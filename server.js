@@ -13,7 +13,7 @@ app.use(express.json());
 
 admin.initializeApp({
   credential: admin.credential.cert(
-    require(path.join(__dirname, "serviceAccountKey.json"))
+    JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
   ),
 });
 
@@ -24,7 +24,7 @@ const firestore = admin.firestore();
 AI SERVER PORT
 Always 3001
 */
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 const rawClientOrigins = process.env.CLIENT_ORIGINS || "";
 

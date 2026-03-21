@@ -1,0 +1,2723 @@
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { db } from "./firebase";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  orderBy,
+  limit,
+} from "firebase/firestore";
+import BottomNav from "./components/BottomNav";
+import FloatingAskLex from "./components/FloatingAskLex";
+
+const CARE_TYPES = [
+  "Farrier",
+  "Vaccines",
+  "Dental",
+  "Medication",
+  "Deworming",
+  "Vet Follow-Up",
+  "Custom",
+];
+
+const REPEAT_OPTIONS = [
+  "One Time",
+  "Every 4 Weeks",
+  "Every 6 Weeks",
+  "Every 8 Weeks",
+  "Monthly",
+  "Every 3 Months",
+  "Every 6 Months",
+  "Yearly",
+];
+
+const ALERT_OPTIONS = [
+  "Same Day",
+  "1 Day Before",
+  "2 Days Before",
+  "1 Week Before",
+];
+
+const CONTACT_TYPES = [
+  { key: "vet", label: "Vet" },
+  { key: "farrier", label: "Farrier" },
+  { key: "trainer", label: "Trainer" },
+  { key: "dentist", label: "Dentist" },
+];
+
+const getTodayInputValue = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatArchiveDateRange = (item) => {
+  const started = item?.startedAt ? new Date(item.startedAt) : null;
+  const ended = item?.endedAt ? new Date(item.endedAt) : null;
+
+  if (started && ended) {
+    return `${started.toLocaleDateString()} – ${ended.toLocaleDateString()}`;
+  }
+
+  if (ended) return ended.toLocaleDateString();
+  if (started) return started.toLocaleDateString();
+
+  return "Unknown date";
+};
+
+const getDaysUntil = (value) => {
+  if (!value) return null;
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  const due = new Date(value);
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+
+  return Math.round((dueDay - today) / (1000 * 60 * 60 * 24));
+};
+
+const formatLogDate = (value) => {
+  if (!value) return "";
+  return new Date(value).toLocaleDateString();
+};
+
+const formatCareDate = (value) => {
+  if (!value) return "";
+  return new Date(value).toLocaleDateString([], {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const emptyContact = () => ({
+  name: "",
+  phone: "",
+  email: "",
+  businessName: "",
+  address: "",
+  notes: "",
+});
+
+const hasContactData = (contact) => {
+  if (!contact) return false;
+  return !!(
+    contact.name ||
+    contact.phone ||
+    contact.email ||
+    contact.businessName ||
+    contact.address ||
+    contact.notes
+  );
+};
+
+export default function HorsesSection(props) {
+  const {
+    user,
+    horses,
+    setHorses,
+    horsesStatus,
+    setHorsesStatus,
+    activeHorseId,
+    setActiveHorseId,
+    onAsk,
+  } = props;
+
+  const navigate = useNavigate();
+
+  const [horseName, setHorseName] = useState("");
+  const [horseAge, setHorseAge] = useState("");
+  const [horseSex, setHorseSex] = useState("");
+  const [horseFeed, setHorseFeed] = useState("");
+  const [horseMeds, setHorseMeds] = useState("");
+  const [horseMedical, setHorseMedical] = useState("");
+  const [horseNotes, setHorseNotes] = useState("");
+
+  const [horseVet, setHorseVet] = useState(emptyContact());
+  const [horseFarrier, setHorseFarrier] = useState(emptyContact());
+  const [horseTrainer, setHorseTrainer] = useState(emptyContact());
+  const [horseDentist, setHorseDentist] = useState(emptyContact());
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [mode, setMode] = useState("add");
+  const [editingHorseId, setEditingHorseId] = useState("");
+
+  const [isViewOpen, setIsViewOpen] = useState(false);
+  const [viewHorse, setViewHorse] = useState(null);
+
+  const [isLogOpen, setIsLogOpen] = useState(false);
+  const [logHorse, setLogHorse] = useState(null);
+  const [logText, setLogText] = useState("");
+
+  const [isEditLogOpen, setIsEditLogOpen] = useState(false);
+  const [editingLog, setEditingLog] = useState(null);
+  const [editingLogText, setEditingLogText] = useState("");
+
+  const [logHistoryByHorseId, setLogHistoryByHorseId] = useState({});
+  const [logHistoryStatusByHorseId, setLogHistoryStatusByHorseId] = useState({});
+  const [logHistoryExpandedByHorseId, setLogHistoryExpandedByHorseId] = useState({});
+
+  const [isHorseLexOpen, setIsHorseLexOpen] = useState(false);
+  const [horseLexHorse, setHorseLexHorse] = useState(null);
+  const [horseLexQuestion, setHorseLexQuestion] = useState("");
+  const [horseLexAnswer, setHorseLexAnswer] = useState("");
+  const [horseLexLoading, setHorseLexLoading] = useState(false);
+  const [horseLexLogs, setHorseLexLogs] = useState([]);
+  const [horseLexSickWatchEntries, setHorseLexSickWatchEntries] = useState([]);
+  const [horseLexSickWatchStatus, setHorseLexSickWatchStatus] = useState("");
+
+  const [archiveByHorseId, setArchiveByHorseId] = useState({});
+  const [archiveStatusByHorseId, setArchiveStatusByHorseId] = useState({});
+  const [archiveExpandedByHorseId, setArchiveExpandedByHorseId] = useState({});
+  const [archiveModalCase, setArchiveModalCase] = useState(null);
+
+  const [careItems, setCareItems] = useState([]);
+  const [isCareOpen, setIsCareOpen] = useState(false);
+  const [careHorse, setCareHorse] = useState(null);
+
+  const [isAddCareOpen, setIsAddCareOpen] = useState(false);
+
+  const [careType, setCareType] = useState("Farrier");
+  const [careTitle, setCareTitle] = useState("");
+  const [careDate, setCareDate] = useState(getTodayInputValue());
+  const [careTime, setCareTime] = useState("");
+  const [repeatInterval, setRepeatInterval] = useState("One Time");
+  const [alertTiming, setAlertTiming] = useState("1 Day Before");
+  const [careNotes, setCareNotes] = useState("");
+
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [contactType, setContactType] = useState("vet");
+  const [contactForm, setContactForm] = useState(emptyContact());
+
+  const [resourcesById, setResourcesById] = useState({});
+
+  const primaryText = "#1E1E1E";
+  const secondaryText = "#6F6A60";
+  const borderColor = "#E5E2DA";
+  const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const burgundy = "#7A2E2E";
+
+  const clearForm = () => {
+    setHorseName("");
+    setHorseAge("");
+    setHorseSex("");
+    setHorseFeed("");
+    setHorseMeds("");
+    setHorseMedical("");
+    setHorseNotes("");
+    setHorseVet(emptyContact());
+    setHorseFarrier(emptyContact());
+    setHorseTrainer(emptyContact());
+    setHorseDentist(emptyContact());
+    setEditingHorseId("");
+    setMode("add");
+  };
+
+  const closeModal = () => {
+    setIsOpen(false);
+    clearForm();
+  };
+
+  const openView = (horse) => {
+    setViewHorse(horse);
+    setIsViewOpen(true);
+  };
+
+  const closeView = () => {
+    setViewHorse(null);
+    setIsViewOpen(false);
+  };
+
+  const clearCareForm = () => {
+    setCareType("Farrier");
+    setCareTitle("");
+    setCareDate(getTodayInputValue());
+    setCareTime("");
+    setRepeatInterval("One Time");
+    setAlertTiming("1 Day Before");
+    setCareNotes("");
+  };
+
+  const closeCareModal = () => {
+    setIsCareOpen(false);
+    setCareHorse(null);
+    setIsAddCareOpen(false);
+    clearCareForm();
+  };
+
+  const closeEditLogModal = () => {
+    setIsEditLogOpen(false);
+    setEditingLog(null);
+    setEditingLogText("");
+  };
+
+  const getContactStateByType = (typeKey) => {
+    if (typeKey === "vet") return horseVet;
+    if (typeKey === "farrier") return horseFarrier;
+    if (typeKey === "trainer") return horseTrainer;
+    if (typeKey === "dentist") return horseDentist;
+    return emptyContact();
+  };
+
+  const setContactStateByType = (typeKey, value) => {
+    if (typeKey === "vet") setHorseVet(value);
+    if (typeKey === "farrier") setHorseFarrier(value);
+    if (typeKey === "trainer") setHorseTrainer(value);
+    if (typeKey === "dentist") setHorseDentist(value);
+  };
+
+  const openContactModal = (typeKey) => {
+    setContactType(typeKey);
+    setContactForm({ ...getContactStateByType(typeKey) });
+    setIsContactModalOpen(true);
+  };
+
+  const closeContactModal = () => {
+    setIsContactModalOpen(false);
+    setContactType("vet");
+    setContactForm(emptyContact());
+  };
+
+  const saveContactModal = () => {
+    if (!contactForm.name.trim() && !contactForm.phone.trim()) {
+      alert("Please add at least a name or phone number.");
+      return;
+    }
+
+    setContactStateByType(contactType, {
+      name: contactForm.name.trim(),
+      phone: contactForm.phone.trim(),
+      email: contactForm.email.trim(),
+      businessName: contactForm.businessName.trim(),
+      address: contactForm.address.trim(),
+      notes: contactForm.notes.trim(),
+    });
+
+    closeContactModal();
+  };
+
+  const reloadHorses = async () => {
+    if (!user?.uid) return;
+
+    try {
+      setHorsesStatus("Loading horses...");
+      const qh = query(collection(db, "horses"), where("ownerUid", "==", user.uid));
+      const hsnap = await getDocs(qh);
+      const hitems = hsnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setHorses(hitems);
+      setHorsesStatus(hitems.length ? "" : "No horses added yet.");
+    } catch (e) {
+      console.log("LOAD HORSES ERROR:", e);
+      setHorsesStatus("Could not load horses.");
+    }
+  };
+
+  const loadResources = async () => {
+  if (!user?.uid) return;
+
+  try {
+    const qr = query(
+      collection(db, "saved_resources"),
+      where("ownerUid", "==", user.uid)
+    );
+
+    const snap = await getDocs(qr);
+
+    const map = {};
+    snap.docs.forEach((d) => {
+      map[d.id] = d.data();
+    });
+
+    setResourcesById(map);
+  } catch (e) {
+    console.log("LOAD RESOURCES ERROR:", e);
+  }
+};
+
+  const loadCareItems = async () => {
+    if (!user?.uid) {
+      setCareItems([]);
+      return;
+    }
+
+    try {
+      const qr = query(
+        collection(db, "reminders"),
+        where("ownerUid", "==", user.uid),
+        where("completed", "==", false)
+      );
+
+      const snap = await getDocs(qr);
+      const items = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
+
+      setCareItems(items);
+    } catch (e) {
+      console.log("LOAD CARE ITEMS ERROR:", e);
+      setCareItems([]);
+    }
+  };
+
+  useEffect(() => {
+  reloadHorses();
+  loadCareItems();
+  loadResources();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [user?.uid]);
+
+  const openAdd = () => {
+    setMode("add");
+    clearForm();
+    setIsOpen(true);
+  };
+
+  const openEdit = (horse) => {
+    setMode("edit");
+    setEditingHorseId(horse.id);
+    setHorseName(horse.name || "");
+    setHorseAge(horse.age || "");
+    setHorseSex(horse.sex || "");
+    setHorseFeed(horse.feed || "");
+    setHorseMeds(horse.meds || "");
+    setHorseMedical(horse.medicalIssues || "");
+    setHorseNotes(horse.notes || "");
+    setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
+    setHorseFarrier({ ...emptyContact(), ...(horse.farrier || {}) });
+    setHorseTrainer({ ...emptyContact(), ...(horse.trainer || {}) });
+    setHorseDentist({ ...emptyContact(), ...(horse.dentist || {}) });
+    setIsOpen(true);
+  };
+
+  const openCareModal = (horse) => {
+    setCareHorse(horse);
+    clearCareForm();
+    setIsAddCareOpen(false);
+    setIsCareOpen(true);
+  };
+
+  const loadLogsForHorse = async (horseId, itemLimit = 10) => {
+    if (!user?.uid || !horseId) return [];
+
+    try {
+      const ql = query(
+        collection(db, "logs"),
+        where("ownerUid", "==", user.uid),
+        where("horseId", "==", horseId),
+        where("type", "==", "note"),
+        orderBy("createdAt", "desc"),
+        limit(itemLimit)
+      );
+
+      const snap = await getDocs(ql);
+      return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      console.log("LOAD LOGS ERROR:", e);
+      return [];
+    }
+  };
+
+  const loadLogHistoryForHorse = async (horseId) => {
+    if (!horseId) return [];
+
+    try {
+      setLogHistoryStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: "Loading logs...",
+      }));
+
+      const items = await loadLogsForHorse(horseId, 20);
+
+      setLogHistoryByHorseId((prev) => ({
+        ...prev,
+        [horseId]: items,
+      }));
+
+      setLogHistoryStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: items.length ? "" : "No logs yet.",
+      }));
+
+      return items;
+    } catch (e) {
+      console.log("LOAD LOG HISTORY ERROR:", e);
+      setLogHistoryByHorseId((prev) => ({
+        ...prev,
+        [horseId]: [],
+      }));
+      setLogHistoryStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: "Could not load logs.",
+      }));
+      return [];
+    }
+  };
+
+  const toggleLogHistory = async (horseId) => {
+    const isOpenNow = !!logHistoryExpandedByHorseId[horseId];
+
+    if (isOpenNow) {
+      setLogHistoryExpandedByHorseId((prev) => ({
+        ...prev,
+        [horseId]: false,
+      }));
+      return;
+    }
+
+    setLogHistoryExpandedByHorseId((prev) => ({
+      ...prev,
+      [horseId]: true,
+    }));
+
+    await loadLogHistoryForHorse(horseId);
+  };
+
+  const openEditLog = (log) => {
+    setEditingLog(log);
+    setEditingLogText(log.text || "");
+    setIsEditLogOpen(true);
+  };
+
+  const saveEditedLog = async () => {
+    if (!editingLog?.id) {
+      alert("No log selected.");
+      return;
+    }
+
+    if (!editingLogText.trim()) {
+      alert("Please enter a log note.");
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, "logs", editingLog.id), {
+        text: editingLogText.trim(),
+        updatedAt: Date.now(),
+      });
+
+      await loadLogHistoryForHorse(editingLog.horseId);
+      closeEditLogModal();
+    } catch (e) {
+      console.log("UPDATE LOG ERROR:", e);
+      alert("Failed to update log.");
+    }
+  };
+
+  const deleteLog = async (log) => {
+    if (!log?.id) return;
+
+    const confirmed = window.confirm("Delete this log?");
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, "logs", log.id));
+      await loadLogHistoryForHorse(log.horseId);
+    } catch (e) {
+      console.log("DELETE LOG ERROR:", e);
+      alert("Failed to delete log.");
+    }
+  };
+
+  const loadSickWatchEntriesForHorse = async (horseId) => {
+    if (!horseId) {
+      setHorseLexSickWatchEntries([]);
+      setHorseLexSickWatchStatus("");
+      return [];
+    }
+
+    try {
+      setHorseLexSickWatchStatus("Loading Sick Watch history...");
+
+      const qs = query(
+        collection(db, "sickwatch"),
+        where("horseId", "==", horseId),
+        orderBy("createdAt", "desc"),
+        limit(12)
+      );
+
+      const snap = await getDocs(qs);
+      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      setHorseLexSickWatchEntries(items);
+      setHorseLexSickWatchStatus(items.length ? "" : "No Sick Watch entries.");
+      return items;
+    } catch (e) {
+      console.log("LOAD SICK WATCH FOR LEX ERROR:", e);
+      setHorseLexSickWatchEntries([]);
+      setHorseLexSickWatchStatus("Could not load Sick Watch history.");
+      return [];
+    }
+  };
+
+  const loadSickWatchArchiveForHorse = async (horseId) => {
+    if (!horseId) return [];
+
+    try {
+      setArchiveStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: "Loading Sick Watch history...",
+      }));
+
+      const qs = query(
+        collection(db, "sickwatch_archive"),
+        where("horseId", "==", horseId),
+        orderBy("endedAt", "desc")
+      );
+
+      const snap = await getDocs(qs);
+      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      setArchiveByHorseId((prev) => ({
+        ...prev,
+        [horseId]: items,
+      }));
+
+      setArchiveStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: items.length ? "" : "No Sick Watch history yet.",
+      }));
+
+      return items;
+    } catch (e) {
+      console.log("LOAD SICK WATCH ARCHIVE ERROR:", e);
+      setArchiveByHorseId((prev) => ({
+        ...prev,
+        [horseId]: [],
+      }));
+      setArchiveStatusByHorseId((prev) => ({
+        ...prev,
+        [horseId]: "Could not load Sick Watch history.",
+      }));
+      return [];
+    }
+  };
+
+  const openLog = (horse) => {
+    setLogHorse(horse);
+    setLogText("");
+    setIsLogOpen(true);
+  };
+
+  const closeLog = () => {
+    setIsLogOpen(false);
+    setLogHorse(null);
+    setLogText("");
+  };
+
+  const saveLog = async () => {
+    if (!user?.uid) {
+      alert("Please log in first.");
+      return;
+    }
+
+    if (!logHorse?.id) {
+      alert("No horse selected to log.");
+      return;
+    }
+
+    if (!logText.trim()) {
+      alert("Please type a log note.");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "logs"), {
+        ownerUid: user.uid,
+        horseId: logHorse.id,
+        text: logText.trim(),
+        type: "note",
+        tags: [],
+        amount: null,
+        createdAt: Date.now(),
+      });
+
+      await updateDoc(doc(db, "horses", logHorse.id), {
+        updatedAt: Date.now(),
+      });
+
+      await reloadHorses();
+      await loadLogHistoryForHorse(logHorse.id);
+      setLogHistoryExpandedByHorseId((prev) => ({
+        ...prev,
+        [logHorse.id]: true,
+      }));
+      setActiveHorseId(logHorse.id);
+      closeLog();
+    } catch (e) {
+      console.log("SAVE LOG ERROR:", e);
+      alert("Failed to save log.");
+    }
+  };
+
+  const saveCareItem = async () => {
+    if (!user?.uid) {
+      alert("Please log in first.");
+      return false;
+    }
+
+    if (!careHorse?.id) {
+      alert("No horse selected.");
+      return false;
+    }
+
+    if (!careDate) {
+      alert("Please choose a due date.");
+      return false;
+    }
+
+    const dueDateMs = new Date(`${careDate}T12:00:00`).getTime();
+
+    if (Number.isNaN(dueDateMs)) {
+      alert("Please enter a valid date.");
+      return false;
+    }
+
+    try {
+      await addDoc(collection(db, "reminders"), {
+        ownerUid: user.uid,
+        horseId: careHorse.id,
+        horseName: careHorse.name || "Unnamed",
+        type: careType,
+        title: careTitle.trim() || careType,
+        dueDate: dueDateMs,
+        time: careTime || "",
+        repeatInterval,
+        alertTiming,
+        notes: careNotes.trim(),
+        completed: false,
+        createdAt: Date.now(),
+      });
+
+      await loadCareItems();
+      clearCareForm();
+      return true;
+    } catch (e) {
+      console.log("SAVE CARE ITEM ERROR:", e);
+      alert("Failed to save care item.");
+      return false;
+    }
+  };
+
+  const deleteCareItem = async (careId) => {
+    if (!careId) return;
+
+    const confirmed = window.confirm("Delete this care item?");
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, "reminders", careId));
+      await loadCareItems();
+    } catch (e) {
+      console.log("DELETE CARE ITEM ERROR:", e);
+      alert("Failed to delete care item.");
+    }
+  };
+
+  const startSickWatch = async (horseId) => {
+    if (!user?.uid || !horseId) return;
+
+    try {
+      await updateDoc(doc(db, "horses", horseId), {
+        sickWatchOn: true,
+        sickWatchStartedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      await reloadHorses();
+      setActiveHorseId(horseId);
+    } catch (e) {
+      console.log("START SICK WATCH ERROR:", e);
+      alert("Failed to start Sick Watch.");
+    }
+  };
+
+  const handleDeleteHorse = async () => {
+    if (!editingHorseId) {
+      alert("No horse selected to delete.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Are you sure you want to permanently delete this horse profile?"
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, "horses", editingHorseId));
+
+      if (activeHorseId === editingHorseId) {
+        setActiveHorseId("");
+      }
+
+      await reloadHorses();
+      closeModal();
+    } catch (e) {
+      console.log("DELETE HORSE ERROR:", e);
+      alert("Failed to delete horse.");
+    }
+  };
+
+  const saveHorse = async () => {
+    if (!user?.uid) {
+      alert("Please log in first.");
+      return;
+    }
+
+    if (!horseName.trim()) {
+      alert("Please enter a horse name.");
+      return;
+    }
+
+    if (!horseSex) {
+      alert("Please select sex.");
+      return;
+    }
+
+    const horsePayload = {
+      name: horseName.trim(),
+      sex: horseSex,
+      age: (horseAge || "").trim(),
+      feed: (horseFeed || "").trim(),
+      meds: (horseMeds || "").trim(),
+      medicalIssues: (horseMedical || "").trim(),
+      notes: (horseNotes || "").trim(),
+      vet: { ...horseVet },
+      farrier: { ...horseFarrier },
+      trainer: { ...horseTrainer },
+      dentist: { ...horseDentist },
+      updatedAt: Date.now(),
+    };
+
+    try {
+      if (mode === "add") {
+        await addDoc(collection(db, "horses"), {
+          ownerUid: user.uid,
+          ...horsePayload,
+          sickWatchOn: false,
+          createdAt: Date.now(),
+        });
+      } else {
+        if (!editingHorseId) {
+          alert("No horse selected to edit.");
+          return;
+        }
+
+        await updateDoc(doc(db, "horses", editingHorseId), horsePayload);
+      }
+
+      await reloadHorses();
+      closeModal();
+    } catch (e) {
+      console.log("SAVE HORSE ERROR:", e);
+      alert(mode === "add" ? "Failed to add horse." : "Failed to update horse.");
+    }
+  };
+
+  const openHorseLex = async (horse) => {
+    setHorseLexHorse(horse);
+    setHorseLexQuestion("");
+    setHorseLexAnswer("");
+    setHorseLexLoading(false);
+    setHorseLexSickWatchEntries([]);
+    setHorseLexSickWatchStatus("");
+    setHorseLexLogs([]);
+    setIsHorseLexOpen(true);
+
+    if (horse?.id) {
+      setActiveHorseId(horse.id);
+      const loadedLogs = await loadLogsForHorse(horse.id);
+      setHorseLexLogs(loadedLogs);
+      await loadSickWatchEntriesForHorse(horse.id);
+    }
+  };
+
+  const closeHorseLex = () => {
+    setIsHorseLexOpen(false);
+    setHorseLexHorse(null);
+    setHorseLexQuestion("");
+    setHorseLexAnswer("");
+    setHorseLexLoading(false);
+    setHorseLexLogs([]);
+    setHorseLexSickWatchEntries([]);
+    setHorseLexSickWatchStatus("");
+  };
+
+  const buildHorseLexPrompt = () => {
+    if (!horseLexHorse) return "";
+
+    const recentLogsText = horseLexLogs.length
+      ? horseLexLogs
+          .map((l) => {
+            return `${l.createdAt ? new Date(l.createdAt).toLocaleString() : "Unknown time"} | Note | ${
+              l.text || ""
+            }`;
+          })
+          .join("\n")
+      : "No recent logs.";
+
+    const sickWatchText = horseLexSickWatchEntries.length
+      ? horseLexSickWatchEntries
+          .map((entry) => {
+            const parts = [];
+            if (entry.createdAt) parts.push(new Date(entry.createdAt).toLocaleString());
+            if (entry.temperature) parts.push(`Temp: ${entry.temperature}`);
+            if (entry.manure) parts.push(`Manure: ${entry.manure}`);
+            if (entry.urine) parts.push(`Urine: ${entry.urine}`);
+            if (entry.water) parts.push(`Water: ${entry.water}`);
+            if (entry.appetite) parts.push(`Appetite: ${entry.appetite}`);
+            if (entry.symptoms) parts.push(`Symptoms: ${entry.symptoms}`);
+            if (entry.medication) parts.push(`Medication: ${entry.medication}`);
+            if (entry.notes) parts.push(`Notes: ${entry.notes}`);
+            return parts.join(" | ");
+          })
+          .join("\n")
+      : horseLexSickWatchStatus || "No Sick Watch entries.";
+
+    return [
+      "You are Lex, an equine care assistant.",
+      "Answer using the horse data below plus your general horse knowledge.",
+      "Be practical, clear, and grounded.",
+      "Do not claim certainty if you are not certain.",
+      "If the situation sounds urgent, say so clearly.",
+      "Reference the horse context naturally in your answer when relevant.",
+      "",
+      `Horse Name: ${horseLexHorse.name || "Unnamed"}`,
+      `Age: ${horseLexHorse.age || "Unknown"}`,
+      `Sex: ${horseLexHorse.sex || "Unknown"}`,
+      `Feed: ${horseLexHorse.feed || "None listed"}`,
+      `Meds: ${horseLexHorse.meds || "None listed"}`,
+      `Medical Issues: ${horseLexHorse.medicalIssues || "None listed"}`,
+      `Notes: ${horseLexHorse.notes || "None listed"}`,
+      `Sick Watch Active: ${horseLexHorse.sickWatchOn ? "Yes" : "No"}`,
+      "",
+      "Recent Logs:",
+      recentLogsText,
+      "",
+      "Sick Watch Entries:",
+      sickWatchText,
+      "",
+      `User Question: ${horseLexQuestion.trim()}`,
+    ].join("\n");
+  };
+
+  const handleAskHorseLex = async () => {
+    if (!horseLexQuestion.trim()) {
+      alert("Type a question first.");
+      return;
+    }
+
+    if (!horseLexHorse) {
+      alert("No horse selected.");
+      return;
+    }
+
+    setHorseLexLoading(true);
+    setHorseLexAnswer("");
+
+    try {
+      if (typeof onAsk === "function") {
+        const result = await onAsk(buildHorseLexPrompt());
+
+        if (typeof result === "string") {
+          setHorseLexAnswer(result);
+        } else if (result?.answer) {
+          setHorseLexAnswer(result.answer);
+        } else {
+          setHorseLexAnswer("Lex did not return an answer.");
+        }
+      } else {
+        setHorseLexAnswer("Ask Lex is not connected yet.");
+      }
+    } catch (e) {
+      console.log("HORSE ASK LEX ERROR:", e);
+      setHorseLexAnswer("Something went wrong while asking Lex.");
+    } finally {
+      setHorseLexLoading(false);
+    }
+  };
+
+  const copyHorseLexAnswer = async () => {
+    if (!horseLexAnswer) return;
+
+    try {
+      await navigator.clipboard.writeText(horseLexAnswer);
+      alert("Answer copied.");
+    } catch (e) {
+      console.log("COPY HORSE LEX ANSWER ERROR:", e);
+      alert("Could not copy answer.");
+    }
+  };
+
+  const toggleArchiveHistory = async (horseId) => {
+    const isOpenNow = !!archiveExpandedByHorseId[horseId];
+
+    if (isOpenNow) {
+      setArchiveExpandedByHorseId((prev) => ({
+        ...prev,
+        [horseId]: false,
+      }));
+      return;
+    }
+
+    setArchiveExpandedByHorseId((prev) => ({
+      ...prev,
+      [horseId]: true,
+    }));
+
+    if (!archiveByHorseId[horseId]) {
+      await loadSickWatchArchiveForHorse(horseId);
+    }
+  };
+
+  const closeArchiveModal = () => {
+    setArchiveModalCase(null);
+  };
+
+  const copyArchiveSummary = async () => {
+    if (!archiveModalCase?.summaryText) return;
+
+    try {
+      await navigator.clipboard.writeText(archiveModalCase.summaryText);
+      alert("Summary copied.");
+    } catch (e) {
+      console.log("COPY ARCHIVE SUMMARY ERROR:", e);
+      alert("Could not copy summary.");
+    }
+  };
+
+  const sendArchiveSummary = async () => {
+    if (!archiveModalCase?.summaryText) return;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${archiveModalCase.horseName || "Horse"} Sick Watch Summary`,
+          text: archiveModalCase.summaryText,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(archiveModalCase.summaryText);
+      alert("Summary copied. You can paste it into text or email.");
+    } catch (e) {
+      console.log("SEND ARCHIVE SUMMARY ERROR:", e);
+      alert("Could not send summary.");
+    }
+  };
+
+  const careSummaryByHorseId = useMemo(() => {
+    const map = {};
+
+    horses.forEach((horse) => {
+      const horseCareItems = careItems.filter(
+        (item) => item.horseId === horse.id && !item.completed
+      );
+
+      const overdue = horseCareItems.filter((item) => {
+        const daysUntil = getDaysUntil(item.dueDate);
+        return daysUntil != null && daysUntil < 0;
+      });
+
+      const upcoming = horseCareItems.filter((item) => {
+        const daysUntil = getDaysUntil(item.dueDate);
+        return daysUntil != null && daysUntil >= 0 && daysUntil <= 7;
+      });
+
+      map[horse.id] = {
+        overdueCount: overdue.length,
+        upcomingCount: upcoming.length,
+      };
+    });
+
+    return map;
+  }, [horses, careItems]);
+
+  const getCareBanner = (horseId) => {
+    const summary = careSummaryByHorseId[horseId];
+
+    if (!summary) return null;
+
+    if (summary.overdueCount > 0) {
+      return {
+        text:
+          summary.overdueCount === 1
+            ? "Care Overdue"
+            : `${summary.overdueCount} Care Items Overdue`,
+        background: "#F2E8E7",
+        color: burgundy,
+      };
+    }
+
+    if (summary.upcomingCount > 0) {
+      return {
+        text:
+          summary.upcomingCount === 1
+            ? "Upcoming Care"
+            : `${summary.upcomingCount} Upcoming Care Items`,
+        background: "#F5EEDB",
+        color: "#6E5A36",
+      };
+    }
+
+    return null;
+  };
+
+  const careItemsForActiveHorse = useMemo(() => {
+    if (!careHorse?.id) return [];
+    return careItems.filter((item) => item.horseId === careHorse.id);
+  }, [careItems, careHorse]);
+
+  if (!user) return null;
+
+  return (
+    <div style={{ minHeight: "100vh", paddingBottom: 100 }}>
+      <div style={{ paddingTop: 8 }}>
+        <div
+          style={{
+            fontSize: 44,
+            lineHeight: 1,
+            fontWeight: 600,
+            letterSpacing: "-0.03em",
+            color: navy,
+          }}
+        >
+          Horses
+        </div>
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <button
+          onClick={openAdd}
+          style={{
+            width: "100%",
+            border: `1px solid ${borderColor}`,
+            borderRadius: 18,
+            padding: "18px 20px",
+            background: "#FBF8F2",
+            color: "#6E5A36",
+            fontWeight: 500,
+            fontSize: 18,
+            cursor: "pointer",
+            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+          }}
+        >
+          + Add Horse
+        </button>
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        {horsesStatus ? (
+          <div className="card" style={{ padding: 18, color: secondaryText }}>
+            {horsesStatus}
+          </div>
+        ) : horses.length === 0 ? (
+          <div className="card" style={{ padding: 18, color: secondaryText }}>
+            No horses added yet.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 16 }}>
+            {horses.map((h) => {
+              const archiveItems = archiveByHorseId[h.id] || [];
+              const archiveStatus = archiveStatusByHorseId[h.id] || "";
+              const archiveExpanded = !!archiveExpandedByHorseId[h.id];
+              const careBanner = getCareBanner(h.id);
+
+              const logItems = logHistoryByHorseId[h.id] || [];
+              const logStatus = logHistoryStatusByHorseId[h.id] || "";
+              const logExpanded = !!logHistoryExpandedByHorseId[h.id];
+
+              return (
+                <div
+                  key={h.id}
+                  className="card"
+                  style={{
+                    padding: 0,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div style={{ padding: 18, position: "relative" }}>
+                    {h.sickWatchOn ? (
+                      <div
+                        onClick={() => navigate(`/sick-watch?horseId=${h.id}`)}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          right: 0,
+                          background: "#F2E8E7",
+                          color: burgundy,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          padding: "12px 18px 12px 22px",
+                          borderBottomLeftRadius: 18,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Sick Watch Active
+                      </div>
+                    ) : null}
+
+                    {careBanner ? (
+                      <div
+                        onClick={() => navigate(`/care?horseId=${h.id}`)}
+                        style={{
+                          position: "absolute",
+                          top: h.sickWatchOn ? 44 : 0,
+                          right: 0,
+                          background: careBanner.background,
+                          color: careBanner.color,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          padding: "12px 18px 12px 22px",
+                          borderBottomLeftRadius: 18,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {careBanner.text}
+                      </div>
+                    ) : null}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 28,
+                            lineHeight: 1.1,
+                            fontWeight: 500,
+                            color: primaryText,
+                            paddingRight: h.sickWatchOn || careBanner ? 170 : 0,
+                          }}
+                        >
+                          {h.name || "Unnamed"}
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 8,
+                            fontSize: 16,
+                            color: secondaryText,
+                          }}
+                        >
+                          {h.age ? `${h.age} years old` : "Age —"} · {h.sex ? h.sex : "Sex —"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        flexWrap: "wrap",
+                        marginTop: 18,
+                      }}
+                    >
+                      <button
+                        className="small-button"
+                        onClick={() => {
+                          setActiveHorseId(h.id);
+                          openView(h);
+                        }}
+                      >
+                        View
+                      </button>
+
+                      <button
+                        className="small-button"
+                        onClick={() => {
+                          setActiveHorseId(h.id);
+                          openEdit(h);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+
+                    <div
+                      style={{
+                        height: 1,
+                        background: borderColor,
+                        marginTop: 16,
+                        marginBottom: 14,
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        fontSize: 15,
+                        color: secondaryText,
+                        lineHeight: 1.45,
+                        minHeight: 24,
+                      }}
+                    >
+                      {h.notes ? `Notes: ${h.notes}` : "Notes: —"}
+                      {h.vetId && resourcesById[h.vetId] ? (
+  <div style={{ marginTop: 10 }}>
+    <div style={{ fontSize: 13, color: secondaryText }}>
+      Veterinarian
+    </div>
+
+    <div style={{ fontSize: 15, color: primaryText }}>
+      {resourcesById[h.vetId].name}
+    </div>
+
+    {resourcesById[h.vetId].phone && (
+      <div style={{ fontSize: 14, color: secondaryText }}>
+        {resourcesById[h.vetId].phone}
+      </div>
+    )}
+  </div>
+) : null}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 12,
+                        marginTop: 16,
+                      }}
+                    >
+                      <button
+                        onClick={() => openHorseLex(h)}
+                        style={{
+                          border: "none",
+                          borderRadius: 14,
+                          padding: "14px 16px",
+                          background: navy,
+                          color: "#FFFFFF",
+                          fontWeight: 600,
+                          fontSize: 16,
+                          cursor: "pointer",
+                          boxShadow: "0 6px 14px rgba(0,0,0,0.10)",
+                        }}
+                        onMouseDown={(e) => {
+                          e.currentTarget.style.background = navyPressed;
+                          e.currentTarget.style.transform = "scale(0.98)";
+                        }}
+                        onMouseUp={(e) => {
+                          e.currentTarget.style.background = navy;
+                          e.currentTarget.style.transform = "scale(1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = navy;
+                          e.currentTarget.style.transform = "scale(1)";
+                        }}
+                      >
+                        Lex This Horse
+                      </button>
+
+                      <button
+                        onClick={() => openLog(h)}
+                        style={{
+                          border: `1px solid ${borderColor}`,
+                          borderRadius: 14,
+                          padding: "14px 16px",
+                          background: "#FBF8F2",
+                          color: "#6C6254",
+                          fontWeight: 500,
+                          fontSize: 16,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Log
+                      </button>
+
+                      <button
+                        onClick={() => openCareModal(h)}
+                        style={{
+                          border: `1px solid ${borderColor}`,
+                          borderRadius: 14,
+                          padding: "14px 16px",
+                          background: "#FBF8F2",
+                          color: "#6C6254",
+                          fontWeight: 500,
+                          fontSize: 16,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Care
+                      </button>
+
+                      {!h.sickWatchOn ? (
+                        <button
+                          onClick={() => startSickWatch(h.id)}
+                          style={{
+                            border: `1px solid ${borderColor}`,
+                            borderRadius: 14,
+                            padding: "14px 16px",
+                            background: "#FBF8F2",
+                            color: burgundy,
+                            fontWeight: 500,
+                            fontSize: 16,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Sick Watch
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/sick-watch?horseId=${h.id}`)}
+                          style={{
+                            border: `1px solid ${borderColor}`,
+                            borderRadius: 14,
+                            padding: "14px 16px",
+                            background: "#FBF8F2",
+                            color: "#6C6254",
+                            fontWeight: 500,
+                            fontSize: 16,
+                            cursor: "pointer",
+                          }}
+                        >
+                          View Sick Watch
+                        </button>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 18,
+                        paddingTop: 14,
+                        borderTop: `1px solid ${borderColor}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 20,
+                            fontWeight: 600,
+                            color: primaryText,
+                          }}
+                        >
+                          Log History
+                        </div>
+
+                        <button className="small-button" onClick={() => toggleLogHistory(h.id)}>
+                          {logExpanded ? "Hide Logs" : "View Logs"}
+                        </button>
+                      </div>
+
+                      {logExpanded ? (
+                        <div style={{ marginTop: 12 }}>
+                          {logStatus ? (
+                            <div style={{ fontSize: 14, color: secondaryText }}>{logStatus}</div>
+                          ) : logItems.length === 0 ? (
+                            <div style={{ fontSize: 14, color: secondaryText }}>No logs yet.</div>
+                          ) : (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {logItems.map((item) => (
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    padding: 14,
+                                    border: `1px solid ${borderColor}`,
+                                    borderRadius: 14,
+                                    background: "#FCFBF8",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      gap: 12,
+                                      alignItems: "flex-start",
+                                    }}
+                                  >
+                                    <div style={{ flex: 1 }}>
+                                      <div
+                                        style={{
+                                          fontSize: 15,
+                                          color: primaryText,
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        Note
+                                      </div>
+
+                                      {item.text ? (
+                                        <div
+                                          style={{
+                                            marginTop: 6,
+                                            fontSize: 14,
+                                            color: primaryText,
+                                            lineHeight: 1.5,
+                                            whiteSpace: "pre-wrap",
+                                          }}
+                                        >
+                                          {item.text}
+                                        </div>
+                                      ) : null}
+                                    </div>
+
+                                    <div
+                                      style={{
+                                        fontSize: 12,
+                                        color: secondaryText,
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {formatLogDate(item.createdAt)}
+                                    </div>
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      flexWrap: "wrap",
+                                      marginTop: 12,
+                                    }}
+                                  >
+                                    <button
+                                      className="small-button"
+                                      onClick={() => openEditLog(item)}
+                                    >
+                                      Edit
+                                    </button>
+
+                                    <button
+                                      className="small-button"
+                                      onClick={() => deleteLog(item)}
+                                      style={{ borderColor: burgundy, color: burgundy }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 18,
+                        paddingTop: 14,
+                        borderTop: `1px solid ${borderColor}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 20,
+                            fontWeight: 600,
+                            color: primaryText,
+                          }}
+                        >
+                          Sick Watch History
+                        </div>
+
+                        <button className="small-button" onClick={() => toggleArchiveHistory(h.id)}>
+                          {archiveExpanded ? "Hide History" : "View History"}
+                        </button>
+                      </div>
+
+                      {archiveExpanded ? (
+                        <div style={{ marginTop: 12 }}>
+                          {archiveStatus ? (
+                            <div style={{ fontSize: 14, color: secondaryText }}>
+                              {archiveStatus}
+                            </div>
+                          ) : archiveItems.length === 0 ? (
+                            <div style={{ fontSize: 14, color: secondaryText }}>
+                              No Sick Watch history yet.
+                            </div>
+                          ) : (
+                            <div style={{ display: "grid", gap: 10 }}>
+                              {archiveItems.map((item) => (
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    padding: 14,
+                                    border: `1px solid ${borderColor}`,
+                                    borderRadius: 14,
+                                    background: "#FCFBF8",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    gap: 12,
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 15,
+                                      color: primaryText,
+                                      fontWeight: 500,
+                                    }}
+                                  >
+                                    {formatArchiveDateRange(item)}
+                                  </div>
+
+                                  <button
+                                    className="small-button"
+                                    onClick={() => setArchiveModalCase(item)}
+                                  >
+                                    View Summary
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {isViewOpen && viewHorse ? (
+        <div className="modal-backdrop" onClick={closeView}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                Horse Details
+              </h3>
+
+              <button
+                onClick={closeView}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: 14, marginTop: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Name</div>
+                <div style={{ fontSize: 18, color: primaryText, fontWeight: 600 }}>
+                  {viewHorse.name || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Age</div>
+                <div style={{ fontSize: 16, color: primaryText }}>{viewHorse.age || "—"}</div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Sex</div>
+                <div style={{ fontSize: 16, color: primaryText }}>{viewHorse.sex || "—"}</div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Feed</div>
+                <div style={{ fontSize: 16, color: primaryText, whiteSpace: "pre-wrap" }}>
+                  {viewHorse.feed || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Meds</div>
+                <div style={{ fontSize: 16, color: primaryText, whiteSpace: "pre-wrap" }}>
+                  {viewHorse.meds || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Medical Issues</div>
+                <div style={{ fontSize: 16, color: primaryText, whiteSpace: "pre-wrap" }}>
+                  {viewHorse.medicalIssues || "—"}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 13, color: secondaryText }}>Notes</div>
+                <div style={{ fontSize: 16, color: primaryText, whiteSpace: "pre-wrap" }}>
+                  {viewHorse.notes || "—"}
+                </div>
+              </div>
+
+              {CONTACT_TYPES.map((contactItem) => {
+                const contact = viewHorse[contactItem.key];
+                if (!hasContactData(contact)) return null;
+
+                return (
+                  <div
+                    key={contactItem.key}
+                    style={{
+                      marginTop: 6,
+                      paddingTop: 14,
+                      borderTop: `1px solid ${borderColor}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 600,
+                        color: primaryText,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {contactItem.label}
+                    </div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {contact.name ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Name</div>
+                          <div style={{ fontSize: 16, color: primaryText }}>{contact.name}</div>
+                        </div>
+                      ) : null}
+
+                      {contact.phone ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Phone</div>
+                          <div style={{ fontSize: 16, color: primaryText }}>{contact.phone}</div>
+                        </div>
+                      ) : null}
+
+                      {contact.email ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Email</div>
+                          <div style={{ fontSize: 16, color: primaryText }}>{contact.email}</div>
+                        </div>
+                      ) : null}
+
+                      {contact.businessName ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Business Name</div>
+                          <div style={{ fontSize: 16, color: primaryText }}>
+                            {contact.businessName}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {contact.address ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Address</div>
+                          <div
+                            style={{
+                              fontSize: 16,
+                              color: primaryText,
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {contact.address}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {contact.notes ? (
+                        <div>
+                          <div style={{ fontSize: 13, color: secondaryText }}>Notes</div>
+                          <div
+                            style={{
+                              fontSize: 16,
+                              color: primaryText,
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {contact.notes}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+              <button className="secondary-button" onClick={closeView}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isOpen ? (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                {mode === "add" ? "Add Horse" : "Edit Horse"}
+              </h3>
+
+              <button
+                onClick={closeModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <input
+              className="field-input"
+              placeholder="Horse Name"
+              value={horseName}
+              onChange={(e) => setHorseName(e.target.value)}
+              style={{ marginTop: 12 }}
+            />
+
+            <input
+              className="field-input"
+              placeholder="Age"
+              value={horseAge}
+              onChange={(e) => setHorseAge(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <select
+              className="field-select"
+              value={horseSex}
+              onChange={(e) => setHorseSex(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              <option value="">Sex</option>
+              <option value="Gelding">Gelding</option>
+              <option value="Mare">Mare</option>
+              <option value="Stallion">Stallion</option>
+            </select>
+
+            <textarea
+              className="field-textarea"
+              placeholder="Feed"
+              value={horseFeed}
+              onChange={(e) => setHorseFeed(e.target.value)}
+              rows={2}
+              style={{ marginTop: 10 }}
+            />
+
+            <textarea
+              className="field-textarea"
+              placeholder="Meds"
+              value={horseMeds}
+              onChange={(e) => setHorseMeds(e.target.value)}
+              rows={2}
+              style={{ marginTop: 10 }}
+            />
+
+            <textarea
+              className="field-textarea"
+              placeholder="Known Medical Issues"
+              value={horseMedical}
+              onChange={(e) => setHorseMedical(e.target.value)}
+              rows={2}
+              style={{ marginTop: 10 }}
+            />
+
+            <textarea
+              className="field-textarea"
+              placeholder="Notes"
+              value={horseNotes}
+              onChange={(e) => setHorseNotes(e.target.value)}
+              rows={3}
+              style={{ marginTop: 10 }}
+            />
+
+            <div style={{ marginTop: 16 }}>
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: primaryText,
+                  marginBottom: 10,
+                }}
+              >
+                Horse Contacts
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {CONTACT_TYPES.map((item) => {
+                  const contact = getContactStateByType(item.key);
+                  const hasData = hasContactData(contact);
+
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => openContactModal(item.key)}
+                      style={{
+                        border: `1px solid ${borderColor}`,
+                        borderRadius: 14,
+                        padding: "14px 16px",
+                        background: "#FBF8F2",
+                        color: hasData ? navy : "#6C6254",
+                        fontWeight: 500,
+                        fontSize: 16,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {hasData ? `Edit ${item.label}` : `Add ${item.label}`}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 16,
+              }}
+            >
+              {mode === "edit" ? (
+                <button
+                  onClick={handleDeleteHorse}
+                  style={{
+                    border: "none",
+                    borderRadius: 14,
+                    padding: "12px 16px",
+                    background: burgundy,
+                    color: "#FFFFFF",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Delete Horse
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="secondary-button" onClick={closeModal}>
+                  Cancel
+                </button>
+                <button className="primary-button" onClick={saveHorse}>
+                  {mode === "add" ? "Add Horse" : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isContactModalOpen ? (
+        <div className="modal-backdrop" onClick={closeContactModal}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 28,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                {CONTACT_TYPES.find((item) => item.key === contactType)?.label}
+              </h3>
+
+              <button
+                onClick={closeContactModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <input
+              className="field-input"
+              placeholder="Name"
+              value={contactForm.name}
+              onChange={(e) => setContactForm((prev) => ({ ...prev, name: e.target.value }))}
+              style={{ marginTop: 12 }}
+            />
+
+            <input
+              className="field-input"
+              placeholder="Phone"
+              value={contactForm.phone}
+              onChange={(e) => setContactForm((prev) => ({ ...prev, phone: e.target.value }))}
+              style={{ marginTop: 10 }}
+            />
+
+            <input
+              className="field-input"
+              placeholder="Email (optional)"
+              value={contactForm.email}
+              onChange={(e) => setContactForm((prev) => ({ ...prev, email: e.target.value }))}
+              style={{ marginTop: 10 }}
+            />
+
+            <input
+              className="field-input"
+              placeholder="Business Name (optional)"
+              value={contactForm.businessName}
+              onChange={(e) =>
+                setContactForm((prev) => ({ ...prev, businessName: e.target.value }))
+              }
+              style={{ marginTop: 10 }}
+            />
+
+            <textarea
+              className="field-textarea"
+              placeholder="Address (optional)"
+              value={contactForm.address}
+              onChange={(e) => setContactForm((prev) => ({ ...prev, address: e.target.value }))}
+              rows={2}
+              style={{ marginTop: 10 }}
+            />
+
+            <textarea
+              className="field-textarea"
+              placeholder="Notes (optional)"
+              value={contactForm.notes}
+              onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
+              rows={3}
+              style={{ marginTop: 10 }}
+            />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="secondary-button" onClick={closeContactModal}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={saveContactModal}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isLogOpen ? (
+        <div className="modal-backdrop" onClick={closeLog}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                Log — {logHorse?.name || "Unnamed"}
+              </h3>
+
+              <button
+                onClick={closeLog}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <textarea
+              className="field-textarea"
+              placeholder="What would you like to note about this horse?"
+              value={logText}
+              onChange={(e) => setLogText(e.target.value)}
+              rows={5}
+              style={{ marginTop: 12 }}
+            />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="secondary-button" onClick={closeLog}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={saveLog}>
+                Save Log
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isEditLogOpen && editingLog ? (
+        <div className="modal-backdrop" onClick={closeEditLogModal}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                Edit Log
+              </h3>
+
+              <button
+                onClick={closeEditLogModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <textarea
+              className="field-textarea"
+              placeholder="Edit note..."
+              value={editingLogText}
+              onChange={(e) => setEditingLogText(e.target.value)}
+              rows={5}
+              style={{ marginTop: 12 }}
+            />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="secondary-button" onClick={closeEditLogModal}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={saveEditedLog}>
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isCareOpen && careHorse ? (
+        <div className="modal-backdrop" onClick={closeCareModal}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              display: "flex",
+              flexDirection: "column",
+              paddingBottom: 0,
+            }}
+          >
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                paddingBottom: 12,
+                borderBottom: `1px solid ${borderColor}`,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: 30,
+                    fontWeight: 600,
+                    color: navy,
+                  }}
+                >
+                  Care — {careHorse.name || "Unnamed"}
+                </h3>
+
+                <button
+                  onClick={closeCareModal}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    fontSize: 24,
+                    cursor: "pointer",
+                    color: secondaryText,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                overflowY: "auto",
+                paddingTop: 16,
+                paddingBottom: 16,
+                flex: 1,
+              }}
+            >
+              <button
+                className="primary-button"
+                onClick={() => setIsAddCareOpen(true)}
+                style={{ width: "100%" }}
+              >
+                + Add Care Appointment
+              </button>
+
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: primaryText }}>
+                  Current Care Items
+                </div>
+
+                {careItemsForActiveHorse.length === 0 ? (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      fontSize: 14,
+                      color: secondaryText,
+                    }}
+                  >
+                    No care items yet for this horse.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                    {careItemsForActiveHorse.map((item) => {
+                      const days = getDaysUntil(item.dueDate);
+
+                      let badgeText = "";
+                      let badgeBg = "#F5F2EB";
+                      let badgeColor = secondaryText;
+
+                      if (days != null && days < 0) {
+                        badgeText = "Overdue";
+                        badgeBg = "#F2E8E7";
+                        badgeColor = burgundy;
+                      } else if (days === 0) {
+                        badgeText = "Due Today";
+                        badgeBg = "#F5EEDB";
+                        badgeColor = "#6E5A36";
+                      } else if (days != null && days > 0 && days <= 7) {
+                        badgeText = `${days} day${days === 1 ? "" : "s"} away`;
+                        badgeBg = "#F5EEDB";
+                        badgeColor = "#6E5A36";
+                      }
+
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            padding: 14,
+                            border: `1px solid ${borderColor}`,
+                            borderRadius: 14,
+                            background: "#FCFBF8",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 12,
+                              alignItems: "flex-start",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: 16,
+                                  fontWeight: 600,
+                                  color: primaryText,
+                                }}
+                              >
+                                {item.title || "Care Item"}
+                              </div>
+
+                              <div
+                                style={{
+                                  fontSize: 14,
+                                  color: secondaryText,
+                                  marginTop: 4,
+                                }}
+                              >
+                                {(item.type || "Custom")} · {formatCareDate(item.dueDate)}
+                                {item.time ? ` · ${item.time}` : ""}
+                              </div>
+
+                              {item.notes ? (
+                                <div
+                                  style={{
+                                    fontSize: 14,
+                                    color: primaryText,
+                                    marginTop: 8,
+                                    whiteSpace: "pre-wrap",
+                                  }}
+                                >
+                                  {item.notes}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {badgeText ? (
+                              <div
+                                style={{
+                                  padding: "6px 10px",
+                                  borderRadius: 999,
+                                  background: badgeBg,
+                                  color: badgeColor,
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {badgeText}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              flexWrap: "wrap",
+                              marginTop: 12,
+                            }}
+                          >
+                            <button
+                              className="small-button"
+                              onClick={() => deleteCareItem(item.id)}
+                              style={{ borderColor: burgundy, color: burgundy }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                background: "#FFFFFF",
+                borderTop: `1px solid ${borderColor}`,
+                paddingTop: 12,
+                paddingBottom: 14,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <button className="secondary-button" onClick={closeCareModal}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isHorseLexOpen && horseLexHorse ? (
+        <div className="modal-backdrop" onClick={closeHorseLex}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                Lex This Horse
+              </h3>
+
+              <button
+                onClick={closeHorseLex}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ fontSize: 14, color: secondaryText, marginTop: 4 }}>
+              Asking about: {horseLexHorse.name || "Unnamed"}
+            </div>
+
+            <textarea
+              className="field-textarea"
+              placeholder="Ask Lex anything about this horse..."
+              value={horseLexQuestion}
+              onChange={(e) => setHorseLexQuestion(e.target.value)}
+              rows={5}
+              style={{ marginTop: 12 }}
+            />
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="secondary-button" onClick={closeHorseLex}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={handleAskHorseLex}>
+                {horseLexLoading ? "Asking..." : "Ask Lex"}
+              </button>
+            </div>
+
+            {horseLexLoading || horseLexAnswer ? (
+              <div
+                style={{
+                  marginTop: 18,
+                  padding: 16,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 16,
+                  background: "#FCFBF8",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 18,
+                    marginBottom: 8,
+                    color: primaryText,
+                  }}
+                >
+                  Lex
+                </div>
+
+                <div
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    fontSize: 15,
+                    lineHeight: 1.55,
+                    color: primaryText,
+                  }}
+                >
+                  {horseLexLoading ? "Thinking..." : horseLexAnswer}
+                </div>
+
+                {!horseLexLoading && horseLexAnswer ? (
+                  <button
+                    className="small-button"
+                    style={{ marginTop: 14 }}
+                    onClick={copyHorseLexAnswer}
+                  >
+                    Copy Answer
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {archiveModalCase ? (
+        <div className="modal-backdrop" onClick={closeArchiveModal}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 30,
+                  fontWeight: 600,
+                  color: navy,
+                }}
+              >
+                Sick Watch Summary
+              </h3>
+
+              <button
+                onClick={closeArchiveModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ fontSize: 14, color: secondaryText, marginTop: 4 }}>
+              {archiveModalCase.horseName || "Unnamed"} · {formatArchiveDateRange(archiveModalCase)}
+            </div>
+
+            <textarea
+              className="field-textarea"
+              value={archiveModalCase.summaryText || ""}
+              readOnly
+              rows={12}
+              style={{ marginTop: 12 }}
+            />
+
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                justifyContent: "flex-end",
+                marginTop: 16,
+                flexWrap: "wrap",
+              }}
+            >
+              <button className="secondary-button" onClick={copyArchiveSummary}>
+                Copy Summary
+              </button>
+              <button className="primary-button" onClick={sendArchiveSummary}>
+                Send Summary
+              </button>
+              <button className="secondary-button" onClick={closeArchiveModal}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isAddCareOpen ? (
+        <div className="modal-backdrop" onClick={() => setIsAddCareOpen(false)}>
+          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-handle" />
+
+            <h3 style={{ fontSize: 28, marginBottom: 12, color: navy }}>
+              Add Care Appointment
+            </h3>
+
+            <select
+              className="field-select"
+              value={careType}
+              onChange={(e) => setCareType(e.target.value)}
+            >
+              {CARE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+
+            <input
+              className="field-input"
+              placeholder="Title"
+              value={careTitle}
+              onChange={(e) => setCareTitle(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <input
+              className="field-input"
+              type="date"
+              value={careDate}
+              onChange={(e) => setCareDate(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <input
+              className="field-input"
+              type="time"
+              value={careTime}
+              onChange={(e) => setCareTime(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <select
+              className="field-select"
+              value={repeatInterval}
+              onChange={(e) => setRepeatInterval(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              {REPEAT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="field-select"
+              value={alertTiming}
+              onChange={(e) => setAlertTiming(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              {ALERT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+
+            <textarea
+              className="field-textarea"
+              placeholder="Notes"
+              value={careNotes}
+              onChange={(e) => setCareNotes(e.target.value)}
+              rows={3}
+              style={{ marginTop: 10 }}
+            />
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="secondary-button" onClick={() => setIsAddCareOpen(false)}>
+                Cancel
+              </button>
+
+              <button
+                className="primary-button"
+                onClick={async () => {
+                  const saved = await saveCareItem();
+                  if (saved) setIsAddCareOpen(false);
+                }}
+              >
+                Save Care Appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <FloatingAskLex onAsk={onAsk} />
+      <BottomNav />
+    </div>
+  );
+}

@@ -1,0 +1,401 @@
+import { useEffect, useState } from "react";
+import {
+  collection,
+  getDocs,
+  addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+} from "firebase/firestore";
+
+export default function HorsesSection({
+  db,
+  user,
+  role,
+  horses,
+  setHorses,
+  activeHorseId,
+  setActiveHorseId,
+}) {
+  const API_BASE =
+    process.env.REACT_APP_API_BASE_URL || "http://localhost:3001";
+
+  const primaryText = "#1f2937";
+
+  const [horsesStatus, setHorsesStatus] = useState("");
+
+  const [horseName, setHorseName] = useState("");
+  const [horseAge, setHorseAge] = useState("");
+  const [horseSex, setHorseSex] = useState("");
+  const [horseFeed, setHorseFeed] = useState("");
+  const [horseMeds, setHorseMeds] = useState("");
+  const [horseMedical, setHorseMedical] = useState("");
+  const [horseNotes, setHorseNotes] = useState("");
+
+  const [isEditingHorse, setIsEditingHorse] = useState(false);
+  const [editingHorseId, setEditingHorseId] = useState("");
+
+  const [isHorseLexOpen, setIsHorseLexOpen] = useState(false);
+  const [horseQuestion, setHorseQuestion] = useState("");
+  const [horseAnswer, setHorseAnswer] = useState("");
+  const [horseLexLoading, setHorseLexLoading] = useState(false);
+
+  /* ------------------------------
+  LOAD HORSES
+  ------------------------------ */
+
+  useEffect(() => {
+    const loadHorses = async () => {
+      if (!user) return;
+
+      try {
+        setHorsesStatus("Loading horses...");
+
+        const qh = query(
+          collection(db, "horses"),
+          where("ownerUid", "==", user.uid)
+        );
+
+        const snap = await getDocs(qh);
+
+        const items = snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
+
+        setHorses(items);
+
+        setHorsesStatus(items.length ? "" : "No horses added yet.");
+      } catch (err) {
+        console.log("LOAD HORSES ERROR:", err);
+        setHorsesStatus("Could not load horses.");
+      }
+    };
+
+    loadHorses();
+  }, [db, user, setHorses]);
+
+  /* ------------------------------
+  FORM HELPERS
+  ------------------------------ */
+
+  const clearHorseForm = () => {
+    setHorseName("");
+    setHorseAge("");
+    setHorseSex("");
+    setHorseFeed("");
+    setHorseMeds("");
+    setHorseMedical("");
+    setHorseNotes("");
+  };
+
+  const reloadHorses = async () => {
+    const qh = query(
+      collection(db, "horses"),
+      where("ownerUid", "==", user.uid)
+    );
+
+    const snap = await getDocs(qh);
+
+    const items = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
+    setHorses(items);
+  };
+
+  /* ------------------------------
+  CRUD
+  ------------------------------ */
+
+  const addHorse = async () => {
+    if (!horseName.trim()) {
+      alert("Please enter a horse name.");
+      return;
+    }
+
+    if (!horseSex) {
+      alert("Please select sex.");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "horses"), {
+        ownerUid: user.uid,
+        name: horseName.trim(),
+        age: horseAge.trim(),
+        sex: horseSex,
+        feed: horseFeed.trim(),
+        meds: horseMeds.trim(),
+        medicalIssues: horseMedical.trim(),
+        notes: horseNotes.trim(),
+        createdAt: Date.now(),
+      });
+
+      clearHorseForm();
+      reloadHorses();
+    } catch (err) {
+      console.log(err);
+      alert("Failed to add horse.");
+    }
+  };
+
+  const startEditHorse = (horse) => {
+    setIsEditingHorse(true);
+    setEditingHorseId(horse.id);
+
+    setHorseName(horse.name || "");
+    setHorseAge(horse.age || "");
+    setHorseSex(horse.sex || "");
+    setHorseFeed(horse.feed || "");
+    setHorseMeds(horse.meds || "");
+    setHorseMedical(horse.medicalIssues || "");
+    setHorseNotes(horse.notes || "");
+  };
+
+  const updateHorse = async () => {
+    try {
+      await updateDoc(doc(db, "horses", editingHorseId), {
+        name: horseName,
+        age: horseAge,
+        sex: horseSex,
+        feed: horseFeed,
+        meds: horseMeds,
+        medicalIssues: horseMedical,
+        notes: horseNotes,
+      });
+
+      setIsEditingHorse(false);
+      setEditingHorseId("");
+
+      clearHorseForm();
+
+      reloadHorses();
+    } catch (err) {
+      console.log(err);
+      alert("Failed to update horse.");
+    }
+  };
+
+  const deleteHorse = async (horseId, horseName) => {
+    const ok = window.confirm(`Delete "${horseName}"?`);
+    if (!ok) return;
+
+    await deleteDoc(doc(db, "horses", horseId));
+
+    reloadHorses();
+  };
+
+  /* ------------------------------
+  LEX HORSE
+  ------------------------------ */
+
+  const askHorseLex = async () => {
+    if (!horseQuestion.trim()) return;
+
+    setHorseLexLoading(true);
+    setHorseAnswer("");
+
+    try {
+      const res = await fetch(`${API_BASE}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: horseQuestion,
+          activeHorseId,
+        }),
+      });
+
+      const data = await res.json();
+
+      setHorseAnswer(data.answer || "No answer returned.");
+    } catch (err) {
+      console.log(err);
+      setHorseAnswer("AI request failed.");
+    }
+
+    setHorseLexLoading(false);
+  };
+
+  if (!user) return null;
+
+  return (
+    <>
+      <hr style={{ margin: "28px 0" }} />
+
+      <h2>Horse Profiles</h2>
+
+      {/* ACTIVE HORSE */}
+
+      {horses.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <label>Active horse:</label>
+
+          <select
+            value={activeHorseId}
+            onChange={(e) => setActiveHorseId(e.target.value)}
+          >
+            <option value="">-- Select --</option>
+
+            {horses.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* FORM */}
+
+      <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8 }}>
+        <input
+          placeholder="Horse Name"
+          value={horseName}
+          onChange={(e) => setHorseName(e.target.value)}
+        />
+
+        <input
+          placeholder="Age"
+          value={horseAge}
+          onChange={(e) => setHorseAge(e.target.value)}
+        />
+
+        <select
+          value={horseSex}
+          onChange={(e) => setHorseSex(e.target.value)}
+        >
+          <option value="">Sex</option>
+          <option value="Gelding">Gelding</option>
+          <option value="Mare">Mare</option>
+          <option value="Stallion">Stallion</option>
+        </select>
+
+        <textarea
+          placeholder="Feed"
+          value={horseFeed}
+          onChange={(e) => setHorseFeed(e.target.value)}
+        />
+
+        <textarea
+          placeholder="Meds"
+          value={horseMeds}
+          onChange={(e) => setHorseMeds(e.target.value)}
+        />
+
+        <textarea
+          placeholder="Known Medical Issues"
+          value={horseMedical}
+          onChange={(e) => setHorseMedical(e.target.value)}
+        />
+
+        <textarea
+          placeholder="Notes"
+          value={horseNotes}
+          onChange={(e) => setHorseNotes(e.target.value)}
+        />
+
+        <button onClick={isEditingHorse ? updateHorse : addHorse}>
+          {isEditingHorse ? "Save Changes" : "Add horse"}
+        </button>
+      </div>
+
+      {/* HORSE LIST */}
+
+      <div style={{ marginTop: 20 }}>
+        {horsesStatus ? (
+          <div>{horsesStatus}</div>
+        ) : (
+          horses.map((h) => (
+            <div
+              key={h.id}
+              style={{
+                border: "1px solid #ddd",
+                padding: 12,
+                borderRadius: 8,
+                marginBottom: 12,
+              }}
+            >
+              <b>{h.name}</b>
+
+              <div>Age: {h.age || "-"}</div>
+              <div>Sex: {h.sex || "-"}</div>
+
+              {h.feed && <div>Feed: {h.feed}</div>}
+              {h.meds && <div>Meds: {h.meds}</div>}
+              {h.medicalIssues && <div>Medical: {h.medicalIssues}</div>}
+              {h.notes && <div>Notes: {h.notes}</div>}
+
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => startEditHorse(h)}>Edit</button>
+
+                <button
+                  onClick={() => deleteHorse(h.id, h.name)}
+                  style={{ marginLeft: 8 }}
+                >
+                  Delete
+                </button>
+
+                <button
+                  onClick={() => {
+                    setActiveHorseId(h.id);
+                    setIsHorseLexOpen(true);
+                  }}
+                  style={{ marginLeft: 8 }}
+                >
+                  Lex this horse
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* LEX MODAL */}
+
+      {isHorseLexOpen && (
+        <div className="modal-overlay">
+          <div
+            className="modal-sheet"
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3>Ask Lex</h3>
+
+            <textarea
+              placeholder="Ask about this horse..."
+              value={horseQuestion}
+              onChange={(e) => setHorseQuestion(e.target.value)}
+            />
+
+            <button onClick={askHorseLex}>Ask</button>
+
+            {horseLexLoading && <div>Thinking...</div>}
+
+            {horseAnswer && (
+              <div
+                style={{
+                  marginTop: 16,
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "break-word",
+                  maxHeight: "50vh",
+                  overflowY: "auto",
+                  color: primaryText,
+                }}
+              >
+                {horseAnswer}
+              </div>
+            )}
+
+            <button onClick={() => setIsHorseLexOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

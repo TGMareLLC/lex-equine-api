@@ -21,30 +21,39 @@ export default function LoginPage({
   const navy = "#24324A";
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
+  const linkBlue = "#2F5EFF";
 
- const handleLogin = async () => {
-  if (!email.trim() || !password.trim()) {
-    alert("Enter your email and password.");
-    return;
-  }
+  const openPrivacy = () => {
+    window.open("https://lexequine.com/#privacy", "_blank");
+  };
 
-  try {
-    setLoading(true);
-    console.log("LOGIN START");
+  const openTerms = () => {
+    window.open("https://lexequine.com/#terms", "_blank");
+  };
 
-    const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      alert("Enter your email and password.");
+      return;
+    }
 
-    console.log("LOGIN SUCCESS", result);
+    try {
+      setLoading(true);
+      console.log("LOGIN START");
 
-    navigate("/");
-  } catch (e) {
-    console.log("LOGIN ERROR:", e);
-    alert("Could not sign in. Check your email and password.");
-  } finally {
-    console.log("LOGIN END");
-    setLoading(false);
-  }
-};
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+      console.log("LOGIN SUCCESS", result);
+
+      navigate("/");
+    } catch (e) {
+      console.log("LOGIN ERROR:", e);
+      alert("Could not sign in. Check your email and password.");
+    } finally {
+      console.log("LOGIN END");
+      setLoading(false);
+    }
+  };
 
   const handleCreateAccount = async () => {
     if (!email.trim() || !password.trim()) {
@@ -170,6 +179,40 @@ export default function LoginPage({
             background: "#FFF",
           }}
         />
+
+        <div
+          style={{
+            marginTop: 14,
+            fontSize: 13,
+            color: secondaryText,
+            lineHeight: 1.5,
+            textAlign: "center",
+          }}
+        >
+          By creating an account, you agree to our{" "}
+          <span
+            onClick={openPrivacy}
+            style={{
+              color: linkBlue,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Privacy Policy
+          </span>{" "}
+          and{" "}
+          <span
+            onClick={openTerms}
+            style={{
+              color: linkBlue,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Terms &amp; Disclaimers
+          </span>
+          .
+        </div>
 
         <button
           onClick={handleLogin}

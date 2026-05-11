@@ -13,6 +13,9 @@ import {
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 
+const isOffline = () =>
+  typeof navigator !== "undefined" && navigator.onLine === false;
+
 const COST_CATEGORIES = [
   "hay",
   "feed",
@@ -26,6 +29,7 @@ const COST_CATEGORIES = [
 ];
 
 const TIME_VIEWS = ["month", "quarter", "season", "year"];
+const EXPORT_RANGE_OPTIONS = ["all", "year", "season", "custom"];
 
 const getTodayInputValue = () => {
   const d = new Date();
@@ -55,6 +59,11 @@ const groupMonthLabel = (year, monthIndex) =>
     year: "numeric",
   });
 
+const csvEscape = (value) => {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
 export default function CostsPage({ user, horses = [], onAsk }) {
   const [costs, setCosts] = useState([]);
 
@@ -75,12 +84,28 @@ export default function CostsPage({ user, horses = [], onAsk }) {
   const [costDate, setCostDate] = useState(getTodayInputValue());
   const [costNotes, setCostNotes] = useState("");
 
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportRangeType, setExportRangeType] = useState("year");
+  const [exportYear, setExportYear] = useState(String(new Date().getFullYear()));
+  const [exportSeason, setExportSeason] = useState("Winter");
+  const [exportHorseFilter, setExportHorseFilter] = useState("all");
+  const [exportCategoryFilter, setExportCategoryFilter] = useState("all");
+  const [exportItemSearch, setExportItemSearch] = useState("");
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
+
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const homeBg = "#F6F4EE";
   const burgundy = "#7A2E2E";
+  const softBg = "#FBF8F2";
+  const goldText = "#6E5A36";
+  const cardShadow = "0 10px 22px rgba(24, 34, 51, 0.08)";
+  const panelShadow = "0 12px 24px rgba(24, 34, 51, 0.14)";
 
   const horseNameById = useMemo(() => {
     const map = {};
@@ -112,15 +137,37 @@ export default function CostsPage({ user, horses = [], onAsk }) {
     setMode("add");
   };
 
+  const clearExportForm = () => {
+    const currentYear = String(new Date().getFullYear());
+    setExportRangeType("year");
+    setExportYear(currentYear);
+    setExportSeason("Winter");
+    setExportHorseFilter("all");
+    setExportCategoryFilter("all");
+    setExportItemSearch("");
+    setExportStartDate("");
+    setExportEndDate("");
+  };
+
   const closeModal = () => {
     setIsOpen(false);
     clearCostForm();
+  };
+
+  const closeExportModal = () => {
+    setIsExportOpen(false);
+    clearExportForm();
   };
 
   const openAdd = () => {
     clearCostForm();
     setMode("add");
     setIsOpen(true);
+  };
+
+  const openExportModal = () => {
+    clearExportForm();
+    setIsExportOpen(true);
   };
 
   const openEdit = (cost) => {
@@ -161,6 +208,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
 
   useEffect(() => {
     loadCosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
   const saveCost = async () => {
@@ -168,6 +216,11 @@ export default function CostsPage({ user, horses = [], onAsk }) {
       alert("Please log in first.");
       return;
     }
+
+    if (isOffline()) {
+  alert("You're offline. New cost changes can't be saved right now.");
+  return;
+}
 
     if (!costAmount || Number(costAmount) <= 0) {
       alert("Please enter a valid amount.");
@@ -179,8 +232,8 @@ export default function CostsPage({ user, horses = [], onAsk }) {
       return;
     }
 
-    if (!costItem.trim()) {
-      alert("Please enter what this cost was for.");
+    if (costCategory === "other" && !costItem.trim()) {
+      alert('Please enter what this cost was for when using "Other."');
       return;
     }
 
@@ -198,7 +251,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
         horseName: costHorseId === "shared" ? "Shared" : selectedHorse?.name || "Unnamed",
         amount: Number(costAmount),
         category: costCategory,
-        item: costItem.trim(),
+        item: costCategory === "other" ? costItem.trim() : "",
         vendor: costVendor.trim(),
         notes: costNotes.trim(),
         createdAt: Number.isNaN(createdAtMs) ? Date.now() : createdAtMs,
@@ -396,6 +449,154 @@ export default function CostsPage({ user, horses = [], onAsk }) {
       }));
   }, [filteredCosts]);
 
+  const exportPreviewCosts = useMemo(() => {
+    return costs.filter((cost) => {
+      const costDateObj = new Date(cost.createdAt || 0);
+      const costYear = costDateObj.getFullYear();
+      const costMonth = costDateObj.getMonth();
+      const costSeason = getSeasonLabel(costMonth);
+
+      if (exportRangeType === "year" && costYear !== Number(exportYear)) return false;
+
+      if (exportRangeType === "season") {
+        if (costYear !== Number(exportYear)) return false;
+        if (costSeason !== exportSeason) return false;
+      }
+
+      if (exportRangeType === "custom") {
+        const startMs = exportStartDate
+          ? new Date(`${exportStartDate}T00:00:00`).getTime()
+          : null;
+        const endMs = exportEndDate
+          ? new Date(`${exportEndDate}T23:59:59`).getTime()
+          : null;
+
+        if (startMs && cost.createdAt < startMs) return false;
+        if (endMs && cost.createdAt > endMs) return false;
+      }
+
+      if (exportHorseFilter === "shared" && cost.horseId !== null) return false;
+      if (
+        exportHorseFilter !== "all" &&
+        exportHorseFilter !== "shared" &&
+        cost.horseId !== exportHorseFilter
+      ) {
+        return false;
+      }
+
+      if (exportCategoryFilter !== "all" && cost.category !== exportCategoryFilter) return false;
+
+      if (exportItemSearch.trim()) {
+        const search = exportItemSearch.trim().toLowerCase();
+        const itemText = String(cost.item || "").toLowerCase();
+        const notesText = String(cost.notes || "").toLowerCase();
+        const vendorText = String(cost.vendor || "").toLowerCase();
+
+        if (
+          !itemText.includes(search) &&
+          !notesText.includes(search) &&
+          !vendorText.includes(search)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [
+    costs,
+    exportRangeType,
+    exportYear,
+    exportSeason,
+    exportHorseFilter,
+    exportCategoryFilter,
+    exportItemSearch,
+    exportStartDate,
+    exportEndDate,
+  ]);
+
+  const exportPreviewTotal = useMemo(() => {
+    return exportPreviewCosts.reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
+  }, [exportPreviewCosts]);
+
+  const buildExportFileName = () => {
+    const parts = ["lex-costs"];
+
+    if (exportRangeType === "year") {
+      parts.push(exportYear);
+    } else if (exportRangeType === "season") {
+      parts.push(exportSeason.toLowerCase());
+      parts.push(exportYear);
+    } else if (exportRangeType === "custom") {
+      parts.push(exportStartDate || "start");
+      parts.push(exportEndDate || "end");
+    } else {
+      parts.push("all");
+    }
+
+    if (exportHorseFilter === "shared") {
+      parts.push("shared");
+    } else if (exportHorseFilter !== "all") {
+      parts.push((horseNameById[exportHorseFilter] || "horse").toLowerCase().replace(/\s+/g, "-"));
+    }
+
+    if (exportCategoryFilter !== "all") {
+      parts.push(exportCategoryFilter);
+    }
+
+    if (exportItemSearch.trim()) {
+      parts.push(exportItemSearch.trim().toLowerCase().replace(/\s+/g, "-"));
+    }
+
+    return `${parts.join("-")}.csv`;
+  };
+
+  const exportCostsToCsv = () => {
+    if (!exportPreviewCosts.length) {
+      alert("No matching costs to export.");
+      return;
+    }
+
+    const rows = [
+      ["Date", "Horse", "Category", "Item", "Vendor", "Amount", "Notes"],
+      ...exportPreviewCosts
+        .slice()
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+        .map((cost) => {
+          const horseLabel =
+            cost.horseId === null
+              ? "Shared"
+              : horseNameById[cost.horseId] || cost.horseName || "Unnamed";
+
+          return [
+            cost.createdAt ? new Date(cost.createdAt).toLocaleDateString() : "",
+            horseLabel,
+            capitalize(cost.category || "other"),
+            cost.item || "",
+            cost.vendor || "",
+            Number(cost.amount || 0).toFixed(2),
+            cost.notes || "",
+          ];
+        }),
+    ];
+
+    const csvText = rows
+      .map((row) => row.map((cell) => csvEscape(cell)).join(","))
+      .join("\n");
+
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildExportFileName();
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    closeExportModal();
+  };
+
   if (!user) return null;
 
   return (
@@ -432,14 +633,32 @@ export default function CostsPage({ user, horses = [], onAsk }) {
       </div>
 
       <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div className="card" style={{ padding: 18 }}>
+        <div
+          className="card"
+          style={{
+            padding: 18,
+            borderRadius: 22,
+            border: `1px solid ${borderColor}`,
+            background: "#FFFFFF",
+            boxShadow: cardShadow,
+          }}
+        >
           <div style={{ fontSize: 13, color: secondaryText }}>Total Spent</div>
           <div style={{ marginTop: 8, fontSize: 28, fontWeight: 700, color: primaryText }}>
             {formatCurrency(totalSpent)}
           </div>
         </div>
 
-        <div className="card" style={{ padding: 18 }}>
+        <div
+          className="card"
+          style={{
+            padding: 18,
+            borderRadius: 22,
+            border: `1px solid ${borderColor}`,
+            background: "#FFFFFF",
+            boxShadow: cardShadow,
+          }}
+        >
           <div style={{ fontSize: 13, color: secondaryText }}>This Month</div>
           <div style={{ marginTop: 8, fontSize: 28, fontWeight: 700, color: primaryText }}>
             {formatCurrency(thisMonthSpent)}
@@ -452,22 +671,53 @@ export default function CostsPage({ user, horses = [], onAsk }) {
           onClick={openAdd}
           style={{
             width: "100%",
-            border: `1px solid ${borderColor}`,
-            borderRadius: 18,
+            border: `1px solid ${navyBorder}`,
+            borderRadius: 20,
             padding: "18px 20px",
-            background: "#FBF8F2",
-            color: "#6E5A36",
-            fontWeight: 500,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            fontWeight: 600,
             fontSize: 18,
             cursor: "pointer",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+            boxShadow: panelShadow,
+            letterSpacing: "-0.01em",
           }}
         >
           + Add Cost
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
+      <div style={{ marginTop: 12 }}>
+        <button
+          onClick={openExportModal}
+          style={{
+            width: "100%",
+            border: `1px solid ${borderColor}`,
+            borderRadius: 16,
+            padding: "14px 16px",
+            background: softBg,
+            color: goldText,
+            fontWeight: 600,
+            fontSize: 16,
+            cursor: "pointer",
+            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+          }}
+        >
+          Export Costs
+        </button>
+      </div>
+
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
         <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
           <select className="field-select" value={timeView} onChange={(e) => setTimeView(e.target.value)}>
             {TIME_VIEWS.map((view) => (
@@ -505,7 +755,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
           </select>
         </div>
 
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 20 }}>
           {chartData.length === 0 || maxChartValue === 0 ? (
             <div style={{ fontSize: 14, color: secondaryText }}>No graph data yet.</div>
           ) : (
@@ -542,7 +792,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
                           width: `${widthPercent}%`,
                           minWidth: item.total > 0 ? 8 : 0,
                           height: "100%",
-                          background: navy,
+                          background: "linear-gradient(90deg, #31425F 0%, #24324A 100%)",
                           borderRadius: 999,
                         }}
                       />
@@ -555,8 +805,26 @@ export default function CostsPage({ user, horses = [], onAsk }) {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "flex-start",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
             <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>Snapshot</div>
             <div style={{ marginTop: 8, fontSize: 14, color: secondaryText }}>
@@ -578,7 +846,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
                 key={group.key}
                 style={{
                   border: `1px solid ${borderColor}`,
-                  borderRadius: 16,
+                  borderRadius: 18,
                   background: "#FCFBF8",
                   padding: 14,
                 }}
@@ -604,7 +872,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 600, color: primaryText }}>
-                              {formatCurrency(cost.amount)} — {cost.item || "Unnamed item"}
+                              {formatCurrency(cost.amount)} — {cost.item || capitalize(cost.category || "other")}
                             </div>
 
                             <div style={{ fontSize: 14, color: secondaryText, marginTop: 4 }}>
@@ -688,7 +956,18 @@ export default function CostsPage({ user, horses = [], onAsk }) {
               style={{ marginTop: 12 }}
             />
 
-            <select className="field-select" value={costCategory} onChange={(e) => setCostCategory(e.target.value)} style={{ marginTop: 10 }}>
+            <select
+              className="field-select"
+              value={costCategory}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCostCategory(value);
+                if (value !== "other") {
+                  setCostItem("");
+                }
+              }}
+              style={{ marginTop: 10 }}
+            >
               {COST_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {capitalize(category)}
@@ -696,15 +975,22 @@ export default function CostsPage({ user, horses = [], onAsk }) {
               ))}
             </select>
 
-            <input
-              className="field-input"
-              placeholder="What was it for?"
-              value={costItem}
-              onChange={(e) => setCostItem(e.target.value)}
-              style={{ marginTop: 10 }}
-            />
+            {costCategory === "other" ? (
+              <input
+                className="field-input"
+                placeholder="What was it for?"
+                value={costItem}
+                onChange={(e) => setCostItem(e.target.value)}
+                style={{ marginTop: 10 }}
+              />
+            ) : null}
 
-            <select className="field-select" value={costHorseId} onChange={(e) => setCostHorseId(e.target.value)} style={{ marginTop: 10 }}>
+            <select
+              className="field-select"
+              value={costHorseId}
+              onChange={(e) => setCostHorseId(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
               {sharedHorseOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.name}
@@ -743,6 +1029,169 @@ export default function CostsPage({ user, horses = [], onAsk }) {
               </button>
               <button className="primary-button" onClick={saveCost}>
                 {mode === "add" ? "Save Cost" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isExportOpen ? (
+        <div className="modal-backdrop" onClick={closeExportModal}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div className="modal-handle" />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 30, fontWeight: 600, color: navy }}>
+                Export Costs
+              </h3>
+
+              <button
+                onClick={closeExportModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 24,
+                  cursor: "pointer",
+                  color: secondaryText,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <select
+              className="field-select"
+              value={exportRangeType}
+              onChange={(e) => setExportRangeType(e.target.value)}
+              style={{ marginTop: 12 }}
+            >
+              {EXPORT_RANGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {capitalize(option)}
+                </option>
+              ))}
+            </select>
+
+            {exportRangeType === "year" || exportRangeType === "season" ? (
+              <select
+                className="field-select"
+                value={exportYear}
+                onChange={(e) => setExportYear(e.target.value)}
+                style={{ marginTop: 10 }}
+              >
+                {availableYears.map((year) => (
+                  <option key={year} value={String(year)}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+
+            {exportRangeType === "season" ? (
+              <select
+                className="field-select"
+                value={exportSeason}
+                onChange={(e) => setExportSeason(e.target.value)}
+                style={{ marginTop: 10 }}
+              >
+                <option value="Winter">Winter</option>
+                <option value="Spring">Spring</option>
+                <option value="Summer">Summer</option>
+                <option value="Fall">Fall</option>
+              </select>
+            ) : null}
+
+            {exportRangeType === "custom" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                <input
+                  className="field-input"
+                  type="date"
+                  value={exportStartDate}
+                  onChange={(e) => setExportStartDate(e.target.value)}
+                />
+                <input
+                  className="field-input"
+                  type="date"
+                  value={exportEndDate}
+                  onChange={(e) => setExportEndDate(e.target.value)}
+                />
+              </div>
+            ) : null}
+
+            <select
+              className="field-select"
+              value={exportHorseFilter}
+              onChange={(e) => setExportHorseFilter(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              <option value="all">All Horses</option>
+              <option value="shared">Shared</option>
+              {horses.map((horse) => (
+                <option key={horse.id} value={horse.id}>
+                  {horse.name || "Unnamed"}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="field-select"
+              value={exportCategoryFilter}
+              onChange={(e) => setExportCategoryFilter(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              <option value="all">All Categories</option>
+              {COST_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {capitalize(category)}
+                </option>
+              ))}
+            </select>
+
+            <input
+              className="field-input"
+              placeholder="Item search (example: hay)"
+              value={exportItemSearch}
+              onChange={(e) => setExportItemSearch(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <div
+              style={{
+                marginTop: 16,
+                padding: 16,
+                border: `1px solid ${borderColor}`,
+                borderRadius: 16,
+                background: "#FCFBF8",
+              }}
+            >
+              <div style={{ fontSize: 14, color: secondaryText }}>Export Preview</div>
+              <div style={{ marginTop: 8, fontSize: 20, fontWeight: 700, color: primaryText }}>
+                {exportPreviewCosts.length} cost{exportPreviewCosts.length === 1 ? "" : "s"} ·{" "}
+                {formatCurrency(exportPreviewTotal)}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="secondary-button" onClick={closeExportModal}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={exportCostsToCsv}>
+                Export CSV
               </button>
             </div>
           </div>

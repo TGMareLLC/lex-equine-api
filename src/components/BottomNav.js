@@ -93,7 +93,14 @@ export default function BottomNav() {
           boxShadow: "0 -4px 14px rgba(0,0,0,0.04)",
           display: "grid",
           gridTemplateColumns: `repeat(${visibleItems.length}, 1fr)`,
-          padding: "8px 4px 14px",
+
+          // 🔥 SAFE AREA FIX (THE IMPORTANT PART)
+          paddingTop: 8,
+          paddingBottom: "max(env(safe-area-inset-bottom), 20px)",
+
+          paddingLeft: 4,
+          paddingRight: 4,
+
           backdropFilter: "blur(8px)",
         }}
       >

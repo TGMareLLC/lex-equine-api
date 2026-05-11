@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { auth, db } from "../firebase";
 import {
   EmailAuthProvider,
@@ -18,12 +18,18 @@ import {
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
+import { Purchases } from "@revenuecat/purchases-capacitor";
+import { Capacitor } from "@capacitor/core";
+
 export default function AccountPage() {
   const navigate = useNavigate();
 
   const [newEmail, setNewEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [subscriptionStatus, setSubscriptionStatus] = useState("Loading...");
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
@@ -33,6 +39,49 @@ export default function AccountPage() {
   const homeBg = "#F6F4EE";
 
   const user = auth.currentUser;
+
+  // 🔥 CHECK SUBSCRIPTION
+  useEffect(() => {
+    const checkSubscription = async () => {
+      try {
+        if (Capacitor.getPlatform() === "ios") {
+          const info = await Purchases.getCustomerInfo();
+
+          console.log("SUB STATUS:", info);
+
+          const active =
+            info?.customerInfo?.entitlements?.active?.premium ||
+            info?.entitlements?.active?.premium;
+
+          if (active) {
+            setIsSubscribed(true);
+            setSubscriptionStatus("Active Subscription");
+          } else {
+            setIsSubscribed(false);
+            setSubscriptionStatus("No Active Subscription");
+          }
+        } else {
+          setSubscriptionStatus("Not available on this device");
+        }
+      } catch (e) {
+        console.log("SUB ERROR:", e);
+        setSubscriptionStatus("Could not load subscription");
+      }
+    };
+
+    checkSubscription();
+  }, []);
+
+  const handleRestore = async () => {
+    try {
+      await Purchases.restorePurchases();
+      alert("Purchases restored.");
+      window.location.reload();
+    } catch (e) {
+      console.log("RESTORE ERROR:", e);
+      alert("Restore failed.");
+    }
+  };
 
   const handleChangeEmail = async () => {
     if (!newEmail || !password) {
@@ -122,45 +171,18 @@ export default function AccountPage() {
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: homeBg,
-        paddingBottom: 40,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 10,
-        }}
-      >
+    <div style={{ minHeight: "100vh", background: homeBg, paddingBottom: 40 }}>
+      
+      {/* HEADER */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <button
           onClick={() => navigate(-1)}
-          style={{
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: navy,
-            padding: 0,
-          }}
-          aria-label="Go back"
+          style={{ border: "none", background: "transparent", cursor: "pointer", color: navy }}
         >
           <ArrowLeft size={24} />
         </button>
 
-        <div
-          style={{
-            fontSize: 36,
-            fontWeight: 600,
-            color: navy,
-          }}
-        >
+        <div style={{ fontSize: 36, fontWeight: 600, color: navy }}>
           Manage Account
         </div>
       </div>
@@ -169,13 +191,31 @@ export default function AccountPage() {
         Update your account settings
       </div>
 
+      {/* EMAIL */}
       <div className="card" style={{ marginTop: 20, padding: 18 }}>
         <div style={{ fontWeight: 600 }}>Email</div>
-        <div style={{ marginTop: 6, color: primaryText }}>
-          {user?.email}
+        <div style={{ marginTop: 6 }}>{user?.email}</div>
+      </div>
+
+      {/* 🔥 SUBSCRIPTION SECTION */}
+      <div className="card" style={{ marginTop: 18, padding: 18 }}>
+        <div style={{ fontWeight: 600 }}>Subscription & Billing</div>
+
+        <div style={{ marginTop: 8 }}>{subscriptionStatus}</div>
+
+        {!isSubscribed && (
+          <div style={{ marginTop: 10, color: secondaryText }}>
+            Subscribe to unlock full access.
+          </div>
+        )}
+
+        
+        <div style={{ marginTop: 12, fontSize: 13, color: secondaryText }}>
+          Manage subscriptions in your Apple account settings.
         </div>
       </div>
 
+      {/* CHANGE EMAIL */}
       <div className="card" style={{ marginTop: 18, padding: 18 }}>
         <div style={{ fontWeight: 600 }}>Change Email</div>
 
@@ -189,8 +229,8 @@ export default function AccountPage() {
 
         <input
           className="field-input"
-          placeholder="Current password"
           type="password"
+          placeholder="Current password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           style={{ marginTop: 10 }}
@@ -206,6 +246,7 @@ export default function AccountPage() {
         </button>
       </div>
 
+      {/* PASSWORD */}
       <div className="card" style={{ marginTop: 18, padding: 18 }}>
         <div style={{ fontWeight: 600 }}>Password</div>
 
@@ -218,25 +259,13 @@ export default function AccountPage() {
         </button>
       </div>
 
-      <div
-        className="card"
-        style={{
-          marginTop: 18,
-          padding: 18,
-          borderColor: burgundy,
-        }}
-      >
+      {/* DELETE */}
+      <div className="card" style={{ marginTop: 18, padding: 18, borderColor: burgundy }}>
         <div style={{ fontWeight: 600, color: burgundy }}>
           Delete Account
         </div>
 
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 14,
-            color: secondaryText,
-          }}
-        >
+        <div style={{ marginTop: 8, fontSize: 14, color: secondaryText }}>
           This action is permanent and cannot be undone.
         </div>
 

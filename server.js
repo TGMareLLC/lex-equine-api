@@ -256,6 +256,96 @@ Medical Issues: ${h.medicalIssues || ""}
 Notes: ${h.notes || ""}
 `;
       }
+
+      const costsSnap = await firestore
+        .collection("costs")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("date", "desc")
+        .limit(5)
+        .get();
+
+      const recentCosts = costsSnap.docs
+        .map((doc) => {
+          const c = doc.data();
+
+          return `- ${c.category || "Expense"}: $${c.amount || 0} on ${c.date || "Unknown date"}`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+RECENT COSTS
+${recentCosts || "No recent costs found."}
+`;
+
+      const remindersSnap = await firestore
+        .collection("reminders")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("dueDate", "asc")
+        .limit(5)
+        .get();
+
+      const upcomingCare = remindersSnap.docs
+        .map((doc) => {
+          const r = doc.data();
+
+          return `- ${r.title || r.type || "Care Item"} due on ${r.dueDate || "Unknown date"}${r.notes ? ` (${r.notes})` : ""}`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+UPCOMING CARE
+${upcomingCare || "No upcoming care found."}
+`;
+
+      const sickWatchSnap = await firestore
+        .collection("sickwatch")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+
+      const recentHealthLogs = sickWatchSnap.docs
+        .map((doc) => {
+          const s = doc.data();
+
+          return `
+- Symptoms: ${s.symptoms || "None"}
+- Appetite: ${s.appetite || "Not logged"}
+- Water: ${s.water || "Not logged"}
+- Temperature: ${s.temperature || "Not logged"}
+- Notes: ${s.notes || "None"}
+`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+RECENT HEALTH LOGS
+${recentHealthLogs || "No recent health logs found."}
+`;
+
+      const logsSnap = await firestore
+        .collection("logs")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+
+      const recentLogs = logsSnap.docs
+        .map((doc) => {
+          const l = doc.data();
+
+          return `- ${l.text || "No details"} (${l.type || "note"})`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+RECENT NOTES
+${recentLogs || "No recent notes found."}
+`;
     }
 
     const systemPrompt = `

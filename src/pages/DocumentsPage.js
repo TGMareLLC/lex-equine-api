@@ -14,6 +14,9 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 
+const isOffline = () =>
+  typeof navigator !== "undefined" && navigator.onLine === false;
+
 const DOCUMENT_TYPES = [
   "Coggins",
   "Health Certificate",
@@ -88,10 +91,14 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const burgundy = "#7A2E2E";
   const goldText = "#6E5A36";
   const goldBg = "#F5EEDB";
   const homeBg = "#F6F4EE";
+  const cardShadow = "0 10px 22px rgba(24, 34, 51, 0.08)";
+  const panelShadow = "0 12px 24px rgba(24, 34, 51, 0.14)";
 
   useEffect(() => {
     setFilterValue(horseIdFromURL || "all");
@@ -105,6 +112,17 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
     });
     return map;
   }, [horses]);
+
+  const documentSummary = useMemo(() => {
+    const expiredCount = documents.filter((item) => getExpiryStatus(item.expiresAt) === "expired").length;
+    const expiringCount = documents.filter((item) => getExpiryStatus(item.expiresAt) === "expiring").length;
+
+    return {
+      total: documents.length,
+      expiredCount,
+      expiringCount,
+    };
+  }, [documents]);
 
   const loadDocuments = async () => {
     if (!user?.uid) {
@@ -193,6 +211,11 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
       alert("Please log in first.");
       return;
     }
+
+    if (isOffline()) {
+  alert("You're offline. New documents can't be uploaded right now.");
+  return;
+}
 
     if (!documentType) {
       alert("Please choose a document type.");
@@ -356,35 +379,108 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
         </div>
       </div>
 
+      <div style={{ marginTop: 18 }}>
+        <div
+          style={{
+            padding: 20,
+            borderRadius: 22,
+            border: `1px solid ${navyBorder}`,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            boxShadow: panelShadow,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              opacity: 0.82,
+            }}
+          >
+            Document Overview
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 30,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            {documentSummary.total}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 15,
+              lineHeight: 1.5,
+              opacity: 0.92,
+            }}
+          >
+            {documentSummary.expiringCount} expiring soon · {documentSummary.expiredCount} expired
+          </div>
+        </div>
+      </div>
+
       <div style={{ marginTop: 22 }}>
         <button
           onClick={openUploadModal}
           style={{
             width: "100%",
-            border: `1px solid ${borderColor}`,
+            border: `1px solid ${navyBorder}`,
             borderRadius: 18,
             padding: "18px 20px",
-            background: "#FBF8F2",
-            color: "#6E5A36",
-            fontWeight: 500,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            fontWeight: 600,
             fontSize: 18,
             cursor: "pointer",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+            boxShadow: panelShadow,
+          }}
+          onMouseDown={(e) => {
+            e.currentTarget.style.background = navyPressed;
+            e.currentTarget.style.transform = "scale(0.995)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
           + Upload Document
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12, color: primaryText }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
           Filter
+        </div>
+
+        <div style={{ marginTop: 8, fontSize: 14, color: secondaryText }}>
+          View all documents, general account documents, or paperwork for a specific horse.
         </div>
 
         <select
           className="field-select"
           value={filterValue}
           onChange={(e) => setFilterValue(e.target.value)}
+          style={{ marginTop: 14 }}
         >
           <option value="all">All Documents</option>
           <option value="general">General Documents</option>
@@ -396,10 +492,22 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
         </select>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
-        <div style={{ fontWeight: 600, marginBottom: 12, color: primaryText }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
           Uploaded Documents
         </div>
+
+        <div style={{ height: 1, background: borderColor, marginTop: 14, marginBottom: 14 }} />
 
         {documentsStatus ? (
           <div style={{ fontSize: 14, color: secondaryText }}>{documentsStatus}</div>
@@ -450,9 +558,10 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
                           marginTop: 6,
                           fontSize: 14,
                           color: secondaryText,
+                          lineHeight: 1.5,
                         }}
                       >
-                        {horseLabel} • Uploaded {formatDate(item.uploadedAt)}
+                        {horseLabel} · Uploaded {formatDate(item.uploadedAt)}
                       </div>
 
                       {item.expiresAt ? (
@@ -499,7 +608,15 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
 
       {isUploadOpen ? (
         <div className="modal-backdrop" onClick={closeUploadModal}>
-          <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxHeight: "88vh",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
             <div className="modal-handle" />
 
             <div

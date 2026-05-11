@@ -76,7 +76,7 @@ export default function FloatingAskLex({ onAsk }) {
         style={{
           position: "fixed",
           right: 18,
-          bottom: 88,
+          bottom: "calc(env(safe-area-inset-bottom) + 76px)",
           zIndex: 1200,
           border: "none",
           borderRadius: 999,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import imageCompression from "browser-image-compression";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { db, storage, auth } from "../firebase";
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 import {
@@ -13,8 +13,13 @@ import {
   orderBy,
   query,
   updateDoc,
+  deleteDoc,
   where,
 } from "firebase/firestore";
+
+const isOffline = () =>
+  typeof navigator !== "undefined" && navigator.onLine === false;
+
 
 const EMPTY_ENTRY_FORM = {
   temp: "",
@@ -73,6 +78,8 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   const [photoPreview, setPhotoPreview] = useState("");
   const [viewerPhotoUrl, setViewerPhotoUrl] = useState("");
 
+  const [resourcesById, setResourcesById] = useState({});
+
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
@@ -81,6 +88,60 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   const burgundy = "#7A2E2E";
   const goldBorder = "#D2B46C";
   const parchment = "#F6F1E7";
+
+  const emptyContact = () => ({
+    name: "",
+    phone: "",
+    email: "",
+    businessName: "",
+    address: "",
+    notes: "",
+  });
+
+  const hasContactData = (contact) => {
+    if (!contact) return false;
+    return Object.values(contact).some((v) => String(v || "").trim() !== "");
+  };
+
+  const getResolvedContact = (horse, typeKey, resourcesMap = {}) => {
+    if (!horse) return emptyContact();
+
+    const directContact = horse[typeKey];
+    if (directContact && hasContactData(directContact)) {
+      return directContact;
+    }
+
+    const resourceId = horse[`${typeKey}Id`];
+    if (resourceId && resourcesMap[resourceId]) {
+      const r = resourcesMap[resourceId];
+
+      return {
+        name: r.name || r.doctorName || "",
+        businessName: r.businessName || r.clinicName || "",
+        phone: r.phone || r.phoneNumber || r.contactPhone || "",
+        email: r.email || "",
+        address: r.address || "",
+        notes: r.notes || "",
+      };
+    }
+
+    if (typeKey === "vet") {
+      const fallback = {
+        name: horse.vetDoctorName || "",
+        businessName: horse.vetClinicName || "",
+        phone: horse.vetPhone || "",
+        email: horse.vetEmail || "",
+        address: horse.vetAddress || "",
+        notes: "",
+      };
+
+      if (hasContactData(fallback)) {
+        return fallback;
+      }
+    }
+
+    return emptyContact();
+  };
 
   const sickWatchHorses = useMemo(() => {
     return (horses || []).filter((h) => h.sickWatchOn);
@@ -154,6 +215,38 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   useEffect(() => {
     loadSickWatchEntries();
   }, [loadSickWatchEntries]);
+
+  useEffect(() => {
+    const loadResources = async () => {
+      try {
+        const userUid = auth.currentUser?.uid;
+
+        if (!userUid) {
+          setResourcesById({});
+          return;
+        }
+
+        const qr = query(
+          collection(db, "saved_resources"),
+          where("ownerUid", "==", userUid)
+        );
+
+        const snap = await getDocs(qr);
+
+        const map = {};
+        snap.docs.forEach((d) => {
+          map[d.id] = { id: d.id, ...d.data() };
+        });
+
+        setResourcesById(map);
+      } catch (e) {
+        console.log("LOAD RESOURCES ERROR:", e);
+        setResourcesById({});
+      }
+    };
+
+    loadResources();
+  }, []);
 
   const latestEntryByHorse = useMemo(() => {
     const map = {};
@@ -303,6 +396,11 @@ export default function SickWatchPage({ horses = [], onAsk }) {
       return;
     }
 
+    if (isOffline()) {
+  alert("You're offline. New Sick Watch entries can't be saved right now.");
+  return;
+}
+
     if (selectedEntryFields.length === 0) {
       alert("Choose at least one entry type.");
       return;
@@ -364,73 +462,78 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   };
 
   const endSickWatch = async (horseId, horseName) => {
-  if (!horseId) return;
+    if (!horseId) return;
 
-  const confirmed = window.confirm(
-    `End Sick Watch for ${horseName || "this horse"}?`
-  );
-  if (!confirmed) return;
+    if (isOffline()) {
+  alert("You're offline. Sick Watch changes can't be saved right now.");
+  return;
+}
 
-  try {
-    const horse =
-      activeHorseById[horseId] ||
-      horses.find((h) => h.id === horseId) ||
-      null;
-
-    const horseEntries = [...(entriesByHorse[horseId] || [])].sort(
-      (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+    const confirmed = window.confirm(
+      `End Sick Watch for ${horseName || "this horse"}?`
     );
+    if (!confirmed) return;
 
-    const summaryText = buildHorseSummaryText(horse);
+    try {
+      const horse =
+        activeHorseById[horseId] ||
+        horses.find((h) => h.id === horseId) ||
+        null;
 
-    const archiveEntries = horseEntries.map((entry) => ({
-      createdAt: entry.createdAt || null,
-      temperature: entry.temperature || "",
-      manure: entry.manure || "",
-      urine: entry.urine || "",
-      water: entry.water || "",
-      appetite: entry.appetite || "",
-      symptoms: entry.symptoms || "",
-      medication: entry.medication || "",
-      notes: entry.notes || "",
-      photoURL: entry.photoURL || "",
-      photoPath: entry.photoPath || "",
-      incidentId: entry.incidentId || "",
-      horseId: entry.horseId || "",
-    }));
+      const horseEntries = [...(entriesByHorse[horseId] || [])].sort(
+        (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+      );
 
-    await addDoc(collection(db, "sickwatch_archive"), {
-      horseId,
-      horseName: horse?.name || horseName || "Unnamed",
-      incidentId: getActiveIncidentId(horse),
-      startedAt: horse?.sickWatchStartedAt || null,
-      endedAt: Date.now(),
-      summaryText,
-      entries: archiveEntries,
-      createdAt: Date.now(),
-    });
+      const summaryText = buildHorseSummaryText(horse);
 
-    await updateDoc(doc(db, "horses", horseId), {
-      sickWatchOn: false,
-      sickWatchStartedAt: null,
-      sickWatchEndedAt: Date.now(),
-      activeSickWatchId: "",
-      updatedAt: Date.now(),
-    });
+      const archiveEntries = horseEntries.map((entry) => ({
+        createdAt: entry.createdAt || null,
+        temperature: entry.temperature || "",
+        manure: entry.manure || "",
+        urine: entry.urine || "",
+        water: entry.water || "",
+        appetite: entry.appetite || "",
+        symptoms: entry.symptoms || "",
+        medication: entry.medication || "",
+        notes: entry.notes || "",
+        photoURL: entry.photoURL || "",
+        photoPath: entry.photoPath || "",
+        incidentId: entry.incidentId || "",
+        horseId: entry.horseId || "",
+      }));
 
-    if (modalHorseId === horseId) {
-      closeEntryModal();
+      await addDoc(collection(db, "sickwatch_archive"), {
+        horseId,
+        horseName: horse?.name || horseName || "Unnamed",
+        incidentId: getActiveIncidentId(horse),
+        startedAt: horse?.sickWatchStartedAt || null,
+        endedAt: Date.now(),
+        summaryText,
+        entries: archiveEntries,
+        createdAt: Date.now(),
+      });
+
+      await updateDoc(doc(db, "horses", horseId), {
+        sickWatchOn: false,
+        sickWatchStartedAt: null,
+        sickWatchEndedAt: Date.now(),
+        activeSickWatchId: "",
+        updatedAt: Date.now(),
+      });
+
+      if (modalHorseId === horseId) {
+        closeEntryModal();
+      }
+
+      await loadSickWatchEntries();
+
+      alert("Sick Watch ended.");
+      window.location.reload();
+    } catch (e) {
+      console.log("END SICK WATCH ERROR:", e);
+      alert(`Failed to end Sick Watch: ${e.message || "Unknown error"}`);
     }
-
-    await loadSickWatchEntries();
-
-    alert("Sick Watch ended.");
-    window.location.reload();
-  } catch (e) {
-    console.log("END SICK WATCH ERROR:", e);
-    alert(`Failed to end Sick Watch: ${e.message || "Unknown error"}`);
-  }
-};
+  };
 
   const toggleHistory = (horseId) => {
     setExpandedHorseIds((prev) => ({
@@ -591,9 +694,12 @@ export default function SickWatchPage({ horses = [], onAsk }) {
               const showVet = !!showVetByHorseId[horse.id];
               const horseEntries = entriesByHorse[horse.id] || [];
               const latestEntry = latestEntryByHorse[horse.id];
+
               const oldestEntry = horseEntries.length
                 ? horseEntries[horseEntries.length - 1]
                 : null;
+
+              const vet = getResolvedContact(horse, "vet", resourcesById);
 
               return (
                 <div
@@ -856,22 +962,19 @@ export default function SickWatchPage({ horses = [], onAsk }) {
 
                       <div style={{ fontSize: 15, color: primaryText, lineHeight: 1.6 }}>
                         <div>
-                          <strong>Clinic:</strong> {horse.vetClinicName || "No clinic saved"}
+                          <strong>Name:</strong> {vet.name || "No name saved"}
                         </div>
+
                         <div>
-                          <strong>Doctor:</strong> {horse.vetDoctorName || "No doctor saved"}
+                          <strong>Phone:</strong> {vet.phone || "No phone saved"}
                         </div>
+
                         <div>
-                          <strong>Hours:</strong> {horse.vetHours || "No hours saved"}
+                          <strong>Email:</strong> {vet.email || "No email saved"}
                         </div>
+
                         <div>
-                          <strong>Address:</strong> {horse.vetAddress || "No address saved"}
-                        </div>
-                        <div>
-                          <strong>Email:</strong> {horse.vetEmail || "No email saved"}
-                        </div>
-                        <div>
-                          <strong>Phone:</strong> {horse.vetPhone || "No phone saved"}
+                          <strong>Address:</strong> {vet.address || "No address saved"}
                         </div>
                       </div>
 
@@ -883,49 +986,36 @@ export default function SickWatchPage({ horses = [], onAsk }) {
                           marginTop: 14,
                         }}
                       >
-                        {horse.vetPhone ? (
-                          <a
-                            href={`tel:${horse.vetPhone}`}
-                            className="small-button"
-                            style={{ textDecoration: "none" }}
-                          >
+                        {vet.phone && (
+                          <a href={`tel:${vet.phone}`} className="small-button">
                             Call
                           </a>
-                        ) : null}
+                        )}
 
-                        {horse.vetPhone ? (
-                          <a
-                            href={`sms:${horse.vetPhone}`}
-                            className="small-button"
-                            style={{ textDecoration: "none" }}
-                          >
+                        {vet.phone && (
+                          <a href={`sms:${vet.phone}`} className="small-button">
                             Text
                           </a>
-                        ) : null}
+                        )}
 
-                        {horse.vetEmail ? (
-                          <a
-                            href={`mailto:${horse.vetEmail}`}
-                            className="small-button"
-                            style={{ textDecoration: "none" }}
-                          >
+                        {vet.email && (
+                          <a href={`mailto:${vet.email}`} className="small-button">
                             Email
                           </a>
-                        ) : null}
+                        )}
 
-                        {horse.vetAddress ? (
+                        {vet.address && (
                           <a
                             href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                              horse.vetAddress
+                              vet.address
                             )}`}
                             target="_blank"
                             rel="noreferrer"
                             className="small-button"
-                            style={{ textDecoration: "none" }}
                           >
                             Directions
                           </a>
-                        ) : null}
+                        )}
                       </div>
                     </div>
                   ) : null}

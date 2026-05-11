@@ -13,6 +13,9 @@ import {
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 
+const isOffline = () =>
+  typeof navigator !== "undefined" && navigator.onLine === false;
+
 const ALERT_OFFSETS = {
   "Same Day": 0,
   "1 Day Before": 1,
@@ -56,6 +59,13 @@ const getTodayInputValue = () => {
   return `${year}-${month}-${day}`;
 };
 
+const getCurrentTimeInputValue = () => {
+  const d = new Date();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
 const formatCareDate = (value) => {
   if (!value) return "";
   return new Date(value).toLocaleDateString([], {
@@ -69,9 +79,17 @@ const getDaysUntil = (value) => {
   if (!value) return null;
 
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
   const due = new Date(value);
-  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+  const dueDay = new Date(
+    due.getFullYear(),
+    due.getMonth(),
+    due.getDate()
+  ).getTime();
 
   return Math.round((dueDay - today) / 86400000);
 };
@@ -108,6 +126,22 @@ const getNextDueDateMs = (currentDueDate, repeatInterval) => {
   return next.getTime();
 };
 
+const buildCareHistoryPayload = (item) => ({
+  ownerUid: item.ownerUid,
+  horseId: item.horseId || null,
+  horseName: item.horseName || "Shared",
+  type: item.type || "Custom",
+  title: item.title || item.type || "Care Item",
+  dueDate: item.dueDate || null,
+  completedAt: Date.now(),
+  time: item.time || "",
+  repeatInterval: item.repeatInterval || "One Time",
+  alertTiming: item.alertTiming || "1 Day Before",
+  notes: item.notes || "",
+costAmount: item.costAmount || null,
+createdAt: item.createdAt || Date.now(),
+});
+
 export default function CarePage({ user, horses = [], onAsk }) {
   const [careItems, setCareItems] = useState([]);
   const [careStatus, setCareStatus] = useState("Loading care schedule...");
@@ -120,17 +154,25 @@ export default function CarePage({ user, horses = [], onAsk }) {
   const [careTitle, setCareTitle] = useState("");
   const [careHorseId, setCareHorseId] = useState("shared");
   const [careDate, setCareDate] = useState(getTodayInputValue());
-  const [careTime, setCareTime] = useState("");
+  const [careTime, setCareTime] = useState(getCurrentTimeInputValue());
   const [repeatInterval, setRepeatInterval] = useState("One Time");
   const [alertTiming, setAlertTiming] = useState("1 Day Before");
   const [careNotes, setCareNotes] = useState("");
+  const [careCost, setCareCost] = useState("");
 
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const homeBg = "#F6F4EE";
   const burgundy = "#7A2E2E";
+  const goldText = "#6E5A36";
+  const goldBg = "#F5EEDB";
+  const blushBg = "#F2E8E7";
+  const cardShadow = "0 10px 22px rgba(24, 34, 51, 0.08)";
+  const panelShadow = "0 12px 24px rgba(24, 34, 51, 0.14)";
 
   const horseNameById = useMemo(() => {
     const map = {};
@@ -155,10 +197,11 @@ export default function CarePage({ user, horses = [], onAsk }) {
     setCareTitle("");
     setCareHorseId("shared");
     setCareDate(getTodayInputValue());
-    setCareTime("");
+    setCareTime(getCurrentTimeInputValue());
     setRepeatInterval("One Time");
     setAlertTiming("1 Day Before");
     setCareNotes("");
+    setCareCost("");
     setIsEditingCare(false);
     setEditingCareId("");
   };
@@ -237,15 +280,20 @@ export default function CarePage({ user, horses = [], onAsk }) {
     setIsEditingCare(true);
     setEditingCareId(item.id || "");
     setCareType(item.type || "Farrier");
-    setCareTitle(item.title || "");
+    setCareTitle(
+      item.type === "Custom" ? item.title || "" : ""
+    );
     setCareHorseId(item.horseId || "shared");
     setCareDate(
-      item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 10) : getTodayInputValue()
+      item.dueDate
+        ? new Date(item.dueDate).toISOString().slice(0, 10)
+        : getTodayInputValue()
     );
     setCareTime(item.time || "");
     setRepeatInterval(item.repeatInterval || "One Time");
     setAlertTiming(item.alertTiming || "1 Day Before");
     setCareNotes(item.notes || "");
+    setCareCost(item.costAmount ? String(item.costAmount) : "");
     setIsOpen(true);
   };
 
@@ -255,8 +303,18 @@ export default function CarePage({ user, horses = [], onAsk }) {
       return;
     }
 
+    if (isOffline()) {
+  alert("You're offline. New care changes can't be saved right now.");
+  return;
+}
+
     if (!careDate) {
       alert("Please choose a due date.");
+      return;
+    }
+
+    if (careType === "Custom" && !careTitle.trim()) {
+      alert("Please enter a title for the custom appointment.");
       return;
     }
 
@@ -272,19 +330,23 @@ export default function CarePage({ user, horses = [], onAsk }) {
         ? horses.find((horse) => horse.id === careHorseId) || null
         : null;
 
+    const resolvedTitle =
+      careType === "Custom" ? careTitle.trim() : careType;
+
     const payload = {
       ownerUid: user.uid,
       horseId: careHorseId === "shared" ? null : careHorseId,
       horseName: careHorseId === "shared" ? "Shared" : selectedHorse?.name || "Unnamed",
       type: careType,
-      title: careTitle.trim() || careType,
+      title: resolvedTitle,
       dueDate: dueDateMs,
       alertDate: dueDateMs - (ALERT_OFFSETS[alertTiming] ?? 1) * 86400000,
       time: careTime || "",
       repeatInterval,
       alertTiming,
       notes: careNotes.trim(),
-      completed: false,
+costAmount: careCost ? Number(careCost) : null,
+completed: false,
     };
 
     try {
@@ -314,6 +376,8 @@ export default function CarePage({ user, horses = [], onAsk }) {
     if (!item?.id) return;
 
     try {
+      await addDoc(collection(db, "care_history"), buildCareHistoryPayload(item));
+
       await updateDoc(doc(db, "reminders", item.id), {
         completed: true,
         completedAt: Date.now(),
@@ -331,7 +395,7 @@ export default function CarePage({ user, horses = [], onAsk }) {
             horseId: item.horseId || null,
             horseName: item.horseName || "Shared",
             type: item.type || "Custom",
-            title: item.title || "Care Item",
+            title: item.title || item.type || "Care Item",
             dueDate: nextDue,
             alertDate: nextAlert,
             time: item.time || "",
@@ -381,15 +445,15 @@ export default function CarePage({ user, horses = [], onAsk }) {
     if (days != null && days < 0) {
       status = "Overdue";
       color = burgundy;
-      bg = "#F2E8E7";
+      bg = blushBg;
     } else if (days === 0) {
       status = "Due Today";
-      color = "#6E5A36";
-      bg = "#F5EEDB";
+      color = goldText;
+      bg = goldBg;
     } else if (days != null && days > 0 && days <= 7) {
       status = `${days} day${days === 1 ? "" : "s"} away`;
-      color = "#6E5A36";
-      bg = "#F5EEDB";
+      color = goldText;
+      bg = goldBg;
     }
 
     return (
@@ -399,6 +463,8 @@ export default function CarePage({ user, horses = [], onAsk }) {
         style={{
           padding: 18,
           background: "#FCFBF8",
+          borderRadius: 18,
+          border: `1px solid ${borderColor}`,
         }}
       >
         <div
@@ -418,7 +484,7 @@ export default function CarePage({ user, horses = [], onAsk }) {
                 color: primaryText,
               }}
             >
-              {item.title || "Care Item"}
+              {item.title || item.type || "Care Item"}
             </div>
 
             <div
@@ -462,7 +528,7 @@ export default function CarePage({ user, horses = [], onAsk }) {
           style={{
             fontSize: 15,
             color: primaryText,
-            lineHeight: 1.5,
+            lineHeight: 1.55,
           }}
         >
           <div>
@@ -522,20 +588,69 @@ export default function CarePage({ user, horses = [], onAsk }) {
     );
   };
 
-  const renderSection = (title, items) =>
+  const renderSection = (title, items, accent = "default") =>
     items.length ? (
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
         <div
           style={{
-            fontSize: 24,
-            fontWeight: 600,
-            color: primaryText,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
           }}
         >
-          {title}
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 600,
+              color: primaryText,
+            }}
+          >
+            {title}
+          </div>
+
+          {accent === "overdue" ? (
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: blushBg,
+                color: burgundy,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              Needs attention
+            </div>
+          ) : null}
+
+          {accent === "today" ? (
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: goldBg,
+                color: goldText,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              Due now
+            </div>
+          ) : null}
         </div>
 
-        <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
           {items.map(renderCard)}
         </div>
       </div>
@@ -570,20 +685,81 @@ export default function CarePage({ user, horses = [], onAsk }) {
         </div>
       </div>
 
+      <div style={{ marginTop: 18 }}>
+        <div
+          style={{
+            padding: 20,
+            borderRadius: 22,
+            border: `1px solid ${navyBorder}`,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            boxShadow: panelShadow,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              opacity: 0.82,
+            }}
+          >
+            Current Schedule
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 30,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            {careItems.length}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 15,
+              lineHeight: 1.5,
+              opacity: 0.92,
+            }}
+          >
+            {overdue.length > 0
+              ? `${overdue.length} overdue · ${today.length} due today · ${upcoming.length} upcoming`
+              : `${today.length} due today · ${upcoming.length} upcoming · ${later.length} later`}
+          </div>
+        </div>
+      </div>
+
       <div style={{ marginTop: 22 }}>
         <button
           onClick={openAddCare}
           style={{
             width: "100%",
-            border: `1px solid ${borderColor}`,
-            borderRadius: 18,
+            border: `1px solid ${navyBorder}`,
+            borderRadius: 20,
             padding: "18px 20px",
-            background: "#FBF8F2",
-            color: "#6E5A36",
-            fontWeight: 500,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            fontWeight: 600,
             fontSize: 18,
             cursor: "pointer",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+            boxShadow: panelShadow,
+            letterSpacing: "-0.01em",
+          }}
+          onMouseDown={(e) => {
+            e.currentTarget.style.background = navyPressed;
+            e.currentTarget.style.transform = "scale(0.995)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
           + Add Care Appointment
@@ -591,13 +767,24 @@ export default function CarePage({ user, horses = [], onAsk }) {
       </div>
 
       {careStatus ? (
-        <div className="card" style={{ marginTop: 18, padding: 18, color: secondaryText }}>
+        <div
+          className="card"
+          style={{
+            marginTop: 18,
+            padding: 18,
+            color: secondaryText,
+            borderRadius: 22,
+            border: `1px solid ${borderColor}`,
+            background: "#FFFFFF",
+            boxShadow: cardShadow,
+          }}
+        >
           {careStatus}
         </div>
       ) : (
         <>
-          {renderSection("Overdue", overdue)}
-          {renderSection("Today", today)}
+          {renderSection("Overdue", overdue, "overdue")}
+          {renderSection("Today", today, "today")}
           {renderSection("Upcoming", upcoming)}
           {renderSection("Later", later)}
         </>
@@ -644,7 +831,13 @@ export default function CarePage({ user, horses = [], onAsk }) {
             <select
               className="field-select"
               value={careType}
-              onChange={(e) => setCareType(e.target.value)}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setCareType(nextType);
+                if (nextType !== "Custom") {
+                  setCareTitle("");
+                }
+              }}
               style={{ marginTop: 12 }}
             >
               {CARE_TYPES.map((type) => (
@@ -654,13 +847,15 @@ export default function CarePage({ user, horses = [], onAsk }) {
               ))}
             </select>
 
-            <input
-              className="field-input"
-              placeholder="Title"
-              value={careTitle}
-              onChange={(e) => setCareTitle(e.target.value)}
-              style={{ marginTop: 10 }}
-            />
+            {careType === "Custom" ? (
+              <input
+                className="field-input"
+                placeholder="Title"
+                value={careTitle}
+                onChange={(e) => setCareTitle(e.target.value)}
+                style={{ marginTop: 10 }}
+              />
+            ) : null}
 
             <select
               className="field-select"
@@ -716,6 +911,15 @@ export default function CarePage({ user, horses = [], onAsk }) {
                 </option>
               ))}
             </select>
+
+            <input
+  className="field-input"
+  type="number"
+  placeholder="Cost (optional)"
+  value={careCost}
+  onChange={(e) => setCareCost(e.target.value)}
+  style={{ marginTop: 10 }}
+/>
 
             <textarea
               className="field-textarea"

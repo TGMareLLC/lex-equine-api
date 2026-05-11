@@ -3,7 +3,11 @@ import {
   initializeAuth,
   browserLocalPersistence
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentSingleTabManager,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -22,5 +26,9 @@ export const auth = initializeAuth(app, {
   persistence: browserLocalPersistence,
 });
 
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentSingleTabManager(),
+  }),
+});
 export const storage = getStorage(app);

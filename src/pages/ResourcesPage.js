@@ -11,12 +11,11 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
-
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 import { CapacitorHttp } from "@capacitor/core";
 
-const API_BASE_URL = "http://192.168.12.157:3001";
+const API_BASE_URL = "https://lex-equine-api.onrender.com";
 
 const RESOURCE_TYPES = [
   { key: "vet", label: "Vet", query: "equine veterinarian" },
@@ -55,54 +54,65 @@ export default function ResourcesPage({ onAsk }) {
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const burgundy = "#7A2E2E";
+  const goldBg = "#F5EEDB";
+  const goldText = "#6E5A36";
   const homeBg = "#F6F4EE";
+  const cardShadow = "0 10px 22px rgba(24, 34, 51, 0.08)";
+  const panelShadow = "0 12px 24px rgba(24, 34, 51, 0.14)";
 
   const selectedResource = useMemo(() => {
     return RESOURCE_TYPES.find((item) => item.key === selectedType);
   }, [selectedType]);
 
-  const fullWidthFieldStyle = {
-    width: "100%",
-    maxWidth: "100%",
-    boxSizing: "border-box",
-  };
-
   const loadSavedResources = async () => {
     if (!auth.currentUser?.uid) return;
 
-    const qs = query(
-      collection(db, "saved_resources"),
-      where("ownerUid", "==", auth.currentUser.uid)
-    );
+    try {
+      const qs = query(
+        collection(db, "saved_resources"),
+        where("ownerUid", "==", auth.currentUser.uid)
+      );
 
-    const snap = await getDocs(qs);
+      const snap = await getDocs(qs);
 
-    const items = snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    }));
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
 
-    setSavedResources(items);
-    setSavedStatus(items.length ? "" : "No saved resources yet.");
+      setSavedResources(items);
+      setSavedStatus(items.length ? "" : "No saved resources yet.");
+    } catch (e) {
+      console.log("LOAD SAVED RESOURCES ERROR:", e);
+      setSavedResources([]);
+      setSavedStatus("Could not load saved resources.");
+    }
   };
 
   const loadHorses = async () => {
     if (!auth.currentUser?.uid) return;
 
-    const qs = query(
-      collection(db, "horses"),
-      where("ownerUid", "==", auth.currentUser.uid)
-    );
+    try {
+      const qs = query(
+        collection(db, "horses"),
+        where("ownerUid", "==", auth.currentUser.uid)
+      );
 
-    const snap = await getDocs(qs);
+      const snap = await getDocs(qs);
 
-    const items = snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    }));
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
 
-    setHorsesList(items);
+      setHorsesList(items);
+    } catch (e) {
+      console.log("LOAD HORSES ERROR:", e);
+      setHorsesList([]);
+    }
   };
 
   useEffect(() => {
@@ -110,49 +120,49 @@ export default function ResourcesPage({ onAsk }) {
     loadHorses();
   }, []);
 
+  const savedSummary = useMemo(() => {
+    const primaryCount = savedResources.filter((item) => item.isPrimary).length;
+    return {
+      total: savedResources.length,
+      primaryCount,
+    };
+  }, [savedResources]);
+
   const searchNearby = async () => {
-  try {
-    console.log("SEARCH CLICKED");
+    try {
+      setIsLoading(true);
+      setResults([]);
+      setResultsStatus("");
 
-    setIsLoading(true);
-    setResults([]);
-    setResultsStatus("");
+      const latitude = 42.3732;
+      const longitude = -72.5199;
 
-    const latitude = 42.3732;
-    const longitude = -72.5199;
+      const response = await CapacitorHttp.post({
+        url: `${API_BASE_URL}/resources-search`,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        data: {
+          resourceType: selectedResource.key,
+          searchTerm: selectedResource.query,
+          latitude,
+          longitude,
+        },
+      });
 
-    console.log("API URL:", `${API_BASE_URL}/resources-search`);
+      const data = response.data || {};
+      const items = Array.isArray(data?.results) ? data.results : [];
 
-    const response = await CapacitorHttp.post({
-  url: `${API_BASE_URL}/resources-search`,
-  headers: {
-    "Content-Type": "application/json",
-  },
-  data: {
-    resourceType: selectedResource.key,
-    searchTerm: selectedResource.query,
-    latitude,
-    longitude,
-  },
-});
-
-console.log("RES STATUS:", response.status);
-
-const data = response.data || {};
-console.log("GOOGLE RESPONSE:", data);
-
-    const items = Array.isArray(data?.results) ? data.results : [];
-
-    setResults(items);
-    setResultsStatus(items.length ? "" : data?.error || "No results found.");
-  } catch (e) {
-    console.log("SEARCH RESOURCES ERROR:", e);
-    setResults([]);
-    setResultsStatus(e?.message || "Could not search resources.");
-  } finally {
-    setIsLoading(false);
-  }
-};
+      setResults(items);
+      setResultsStatus(items.length ? "" : data?.error || "No results found.");
+    } catch (e) {
+      console.log("SEARCH RESOURCES ERROR:", e);
+      setResults([]);
+      setResultsStatus(e?.message || "Could not search resources.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const isSavedResult = (placeId) => {
     return savedResources.some((item) => item.placeId === placeId);
@@ -281,127 +291,98 @@ console.log("GOOGLE RESPONSE:", data);
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: 40, fontWeight: 600, color: navy }}>
-        Resources
-      </div>
-
-      <div style={{ marginTop: 6, color: secondaryText }}>
-        Find services near you
-      </div>
-
-      <div className="card" style={{ marginTop: 20, padding: 18, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>
-          Saved Resources
+      <div style={{ paddingTop: 8 }}>
+        <div
+          style={{
+            fontSize: 44,
+            lineHeight: 1,
+            fontWeight: 600,
+            letterSpacing: "-0.03em",
+            color: navy,
+          }}
+        >
+          Resources
         </div>
 
-        {savedStatus ? (
-          <div style={{ color: secondaryText }}>{savedStatus}</div>
-        ) : (
-          savedResources.map((item) => (
-            <div
-              key={item.id}
-              style={{
-                border: `1px solid ${borderColor}`,
-                borderRadius: 14,
-                padding: 14,
-                marginBottom: 10,
-                background: "#FCFBF8",
-                width: "100%",
-                maxWidth: "100%",
-                boxSizing: "border-box",
-              }}
-            >
-              <div style={{ fontWeight: 600, color: primaryText, wordBreak: "break-word" }}>
-                {item.name}
-              </div>
-
-              <div style={{ fontSize: 13, color: secondaryText, marginTop: 4 }}>
-                {item.horseId ? "Horse specific" : "All horses"}
-              </div>
-
-              {item.phone ? (
-                <div style={{ marginTop: 6, color: primaryText, wordBreak: "break-word" }}>
-                  {item.phone}
-                </div>
-              ) : null}
-
-              {item.address ? (
-                <div
-                  style={{
-                    marginTop: 6,
-                    color: secondaryText,
-                    fontSize: 14,
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {item.address}
-                </div>
-              ) : null}
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: 10,
-                  marginTop: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                {item.phone ? (
-                  <a href={`tel:${item.phone}`} className="small-button">
-                    Call
-                  </a>
-                ) : null}
-
-                {item.directionsUrl ? (
-                  <a
-                    href={item.directionsUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="small-button"
-                  >
-                    Directions
-                  </a>
-                ) : null}
-
-                <button
-                  className="small-button"
-                  onClick={() => {
-                    setAssignResource(item);
-                    setSelectedHorseIds([]);
-                    setIsAssignOpen(true);
-                  }}
-                >
-                  Assign to Horses
-                </button>
-
-                {!item.isPrimary ? (
-                  <button
-                    className="small-button"
-                    onClick={() => setPrimaryResource(item)}
-                    disabled={settingPrimaryId === item.id}
-                  >
-                    {settingPrimaryId === item.id ? "Saving..." : "Set Primary"}
-                  </button>
-                ) : null}
-
-                <button
-                  className="small-button"
-                  style={{ borderColor: burgundy, color: burgundy }}
-                  onClick={() => removeSavedResource(item.id)}
-                  disabled={removingSavedId === item.id}
-                >
-                  {removingSavedId === item.id ? "Removing..." : "Remove"}
-                </button>
-              </div>
-            </div>
-          ))
-        )}
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 20,
+            color: secondaryText,
+            fontWeight: 400,
+          }}
+        >
+          Find services near you
+        </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontWeight: 600 }}>Service Type</div>
+      <div style={{ marginTop: 18 }}>
+        <div
+          style={{
+            padding: 20,
+            borderRadius: 22,
+            border: `1px solid ${navyBorder}`,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            boxShadow: panelShadow,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              opacity: 0.82,
+            }}
+          >
+            Resource Overview
+          </div>
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 30,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            {savedSummary.total}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 15,
+              lineHeight: 1.5,
+              opacity: 0.92,
+            }}
+          >
+            {savedSummary.primaryCount} primary resource
+            {savedSummary.primaryCount === 1 ? "" : "s"} saved across your account
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          width: "100%",
+          boxSizing: "border-box",
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
+          Search Nearby
+        </div>
+
+        <div style={{ marginTop: 8, color: secondaryText, fontSize: 14 }}>
+          Choose a service type, optionally assign it to a horse while saving, then search.
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
           {RESOURCE_TYPES.map((resource) => {
             const active = resource.key === selectedType;
 
@@ -410,12 +391,14 @@ console.log("GOOGLE RESPONSE:", data);
                 key={resource.key}
                 onClick={() => setSelectedType(resource.key)}
                 style={{
-                  padding: "8px 12px",
+                  padding: "9px 13px",
                   borderRadius: 999,
                   border: active ? `1px solid ${navy}` : `1px solid ${borderColor}`,
                   background: active ? navy : "#FFFFFF",
                   color: active ? "#FFFFFF" : primaryText,
                   cursor: "pointer",
+                  fontWeight: 500,
+                  fontSize: 14,
                 }}
               >
                 {resource.label}
@@ -429,7 +412,7 @@ console.log("GOOGLE RESPONSE:", data);
             value={assignHorseId}
             onChange={(e) => setAssignHorseId(e.target.value)}
             className="field-select"
-            style={{ ...fullWidthFieldStyle, marginTop: 12 }}
+            style={{ marginTop: 12 }}
           >
             <option value="">All Horses</option>
             {horsesList.map((h) => (
@@ -446,84 +429,173 @@ console.log("GOOGLE RESPONSE:", data);
           style={{
             width: "100%",
             marginTop: 14,
-            border: "none",
-            borderRadius: 12,
-            padding: "14px",
-            background: navy,
+            border: `1px solid ${navyBorder}`,
+            borderRadius: 18,
+            padding: "16px 18px",
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
             color: "#FFF",
             fontWeight: 600,
+            fontSize: 17,
             cursor: "pointer",
             boxSizing: "border-box",
+            boxShadow: panelShadow,
+          }}
+          onMouseDown={(e) => {
+            e.currentTarget.style.background = navyPressed;
+            e.currentTarget.style.transform = "scale(0.995)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
           {isLoading ? "Searching..." : `Search Nearby ${selectedResource.label}`}
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontWeight: 600, marginBottom: 10 }}>
-          Results
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          width: "100%",
+          boxSizing: "border-box",
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
+            Saved Resources
+          </div>
+
+          {savedSummary.primaryCount > 0 ? (
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: goldBg,
+                color: goldText,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {savedSummary.primaryCount} primary
+            </div>
+          ) : null}
         </div>
 
-        {resultsStatus ? (
-          <div style={{ color: secondaryText }}>{resultsStatus}</div>
-        ) : (
-          results.map((result) => {
-            const saved = savedResources.find((item) => item.placeId === result.placeId);
+        <div style={{ height: 1, background: borderColor, marginTop: 14, marginBottom: 14 }} />
 
-            return (
+        {savedStatus ? (
+          <div style={{ color: secondaryText }}>{savedStatus}</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {savedResources.map((item) => (
               <div
-                key={result.placeId}
+                key={item.id}
                 style={{
                   border: `1px solid ${borderColor}`,
-                  borderRadius: 14,
+                  borderRadius: 16,
                   padding: 14,
-                  marginBottom: 10,
                   background: "#FCFBF8",
                   width: "100%",
                   maxWidth: "100%",
                   boxSizing: "border-box",
                 }}
               >
-                <div style={{ fontWeight: 600, color: primaryText, wordBreak: "break-word" }}>
-                  {result.name}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, color: primaryText, wordBreak: "break-word" }}>
+                      {item.name}
+                    </div>
+
+                    <div style={{ fontSize: 13, color: secondaryText, marginTop: 4 }}>
+                      {item.horseId
+                        ? `Horse specific · ${
+                            horsesList.find((horse) => horse.id === item.horseId)?.name || "Assigned"
+                          }`
+                        : "All horses"}
+                    </div>
+
+                    {item.phone ? (
+                      <div style={{ marginTop: 6, color: primaryText, wordBreak: "break-word" }}>
+                        {item.phone}
+                      </div>
+                    ) : null}
+
+                    {item.address ? (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          color: secondaryText,
+                          fontSize: 14,
+                          wordBreak: "break-word",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {item.address}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {item.isPrimary ? (
+                    <div
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        background: goldBg,
+                        color: goldText,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Primary
+                    </div>
+                  ) : null}
                 </div>
-
-                {result.distanceText ? (
-                  <div style={{ fontSize: 14, color: secondaryText }}>
-                    {result.distanceText}
-                  </div>
-                ) : null}
-
-                {result.address ? (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      color: primaryText,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {result.address}
-                  </div>
-                ) : null}
 
                 <div
                   style={{
                     display: "flex",
                     gap: 10,
-                    marginTop: 10,
+                    marginTop: 12,
                     flexWrap: "wrap",
                   }}
                 >
-                  {result.phone ? (
-                    <a href={`tel:${result.phone}`} className="small-button">
+                  {item.phone ? (
+                    <a href={`tel:${item.phone}`} className="small-button">
                       Call
                     </a>
                   ) : null}
 
-                  {result.directionsUrl ? (
+                  {item.directionsUrl ? (
                     <a
-                      href={result.directionsUrl}
+                      href={item.directionsUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="small-button"
@@ -532,52 +604,183 @@ console.log("GOOGLE RESPONSE:", data);
                     </a>
                   ) : null}
 
-                  {!saved ? (
+                  <button
+                    className="small-button"
+                    onClick={() => {
+                      setAssignResource(item);
+                      setSelectedHorseIds([]);
+                      setIsAssignOpen(true);
+                    }}
+                  >
+                    Assign to Horses
+                  </button>
+
+                  {!item.isPrimary ? (
                     <button
                       className="small-button"
-                      onClick={() => saveResource(result)}
-                      disabled={savingPlaceId === result.placeId}
+                      onClick={() => setPrimaryResource(item)}
+                      disabled={settingPrimaryId === item.id}
                     >
-                      {savingPlaceId === result.placeId ? "Saving..." : "Save"}
+                      {settingPrimaryId === item.id ? "Saving..." : "Set Primary"}
                     </button>
                   ) : null}
+
+                  <button
+                    className="small-button"
+                    style={{ borderColor: burgundy, color: burgundy }}
+                    onClick={() => removeSavedResource(item.id)}
+                    disabled={removingSavedId === item.id}
+                  >
+                    {removingSavedId === item.id ? "Removing..." : "Remove"}
+                  </button>
                 </div>
               </div>
-            );
-          })
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          width: "100%",
+          boxSizing: "border-box",
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
+          Results
+        </div>
+
+        <div style={{ height: 1, background: borderColor, marginTop: 14, marginBottom: 14 }} />
+
+        {resultsStatus ? (
+          <div style={{ color: secondaryText }}>{resultsStatus}</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {results.map((result) => {
+              const saved = savedResources.find((item) => item.placeId === result.placeId);
+
+              return (
+                <div
+                  key={result.placeId}
+                  style={{
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 16,
+                    padding: 14,
+                    background: "#FCFBF8",
+                    width: "100%",
+                    maxWidth: "100%",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "flex-start",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: primaryText, wordBreak: "break-word" }}>
+                        {result.name}
+                      </div>
+
+                      {result.distanceText ? (
+                        <div style={{ fontSize: 14, color: secondaryText, marginTop: 4 }}>
+                          {result.distanceText}
+                        </div>
+                      ) : null}
+
+                      {result.address ? (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color: primaryText,
+                            wordBreak: "break-word",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {result.address}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {saved ? (
+                      <div
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          background: goldBg,
+                          color: goldText,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Saved
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      marginTop: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {result.phone ? (
+                      <a href={`tel:${result.phone}`} className="small-button">
+                        Call
+                      </a>
+                    ) : null}
+
+                    {result.directionsUrl ? (
+                      <a
+                        href={result.directionsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="small-button"
+                      >
+                        Directions
+                      </a>
+                    ) : null}
+
+                    {!saved ? (
+                      <button
+                        className="small-button"
+                        onClick={() => saveResource(result)}
+                        disabled={savingPlaceId === result.placeId}
+                      >
+                        {savingPlaceId === result.placeId ? "Saving..." : "Save"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
       {isAssignOpen && assignResource ? (
-        <div
-          onClick={() => setIsAssignOpen(false)}
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-            padding: 16,
-            boxSizing: "border-box",
-          }}
-        >
+        <div className="modal-backdrop" onClick={() => setIsAssignOpen(false)}>
           <div
+            className="modal-sheet"
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: "#fff",
-              borderRadius: 16,
-              padding: 20,
-              width: "100%",
-              maxWidth: 420,
               maxHeight: "80vh",
               overflowY: "auto",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-              boxSizing: "border-box",
+              WebkitOverflowScrolling: "touch",
             }}
           >
             <div className="modal-handle" />

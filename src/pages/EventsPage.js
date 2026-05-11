@@ -13,6 +13,9 @@ import {
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 
+const isOffline = () =>
+  typeof navigator !== "undefined" && navigator.onLine === false;
+
 const TIME_VIEWS = ["month", "quarter", "season", "year"];
 
 const getTodayInputValue = () => {
@@ -21,6 +24,13 @@ const getTodayInputValue = () => {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const getCurrentTimeInputValue = () => {
+  const d = new Date();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 };
 
 const getSeasonLabel = (monthIndex) => {
@@ -68,16 +78,23 @@ export default function EventsPage({ user, horses = [], onAsk }) {
   const [eventLocation, setEventLocation] = useState("");
   const [eventCost, setEventCost] = useState("");
   const [eventDate, setEventDate] = useState(getTodayInputValue());
+  const [eventTime, setEventTime] = useState(getCurrentTimeInputValue());
+  const [eventReminder, setEventReminder] = useState("none");
   const [eventNotes, setEventNotes] = useState("");
 
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
+  const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const homeBg = "#F6F4EE";
   const burgundy = "#7A2E2E";
   const goldBg = "#F5EEDB";
   const goldText = "#6E5A36";
+  const blushBg = "#F2E8E7";
+  const cardShadow = "0 10px 22px rgba(24, 34, 51, 0.08)";
+  const panelShadow = "0 12px 24px rgba(24, 34, 51, 0.14)";
 
   const horseNameById = useMemo(() => {
     const map = {};
@@ -103,6 +120,8 @@ export default function EventsPage({ user, horses = [], onAsk }) {
     setEventLocation("");
     setEventCost("");
     setEventDate(getTodayInputValue());
+    setEventTime(getCurrentTimeInputValue());
+    setEventReminder("none");
     setEventNotes("");
     setEditingEventId("");
     setMode("add");
@@ -131,6 +150,8 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         ? new Date(event.eventDate).toISOString().slice(0, 10)
         : getTodayInputValue()
     );
+    setEventTime(event.time || "");
+    setEventReminder(event.reminder || "none");
     setEventNotes(event.notes || "");
     setIsOpen(true);
   };
@@ -166,6 +187,11 @@ export default function EventsPage({ user, horses = [], onAsk }) {
       return;
     }
 
+    if (isOffline()) {
+  alert("You're offline. New events can't be saved right now.");
+  return;
+}
+
     if (!eventName.trim()) {
       alert("Please enter an event name.");
       return;
@@ -193,6 +219,8 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         cost: eventCost === "" ? 0 : Number(eventCost),
         notes: eventNotes.trim(),
         eventDate: Number.isNaN(eventDateMs) ? Date.now() : eventDateMs,
+        time: eventTime || "",
+        reminder: eventReminder,
         completed: false,
       };
 
@@ -384,6 +412,32 @@ export default function EventsPage({ user, horses = [], onAsk }) {
       }));
   }, [filteredCompletedEvents]);
 
+  const upcomingSummary = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    let overdueCount = 0;
+    let todayCount = 0;
+    let nextSevenCount = 0;
+
+    activeEvents.forEach((event) => {
+      const eventDateObj = new Date(event.eventDate || 0);
+      const eventDay = new Date(
+        eventDateObj.getFullYear(),
+        eventDateObj.getMonth(),
+        eventDateObj.getDate()
+      ).getTime();
+
+      const diffDays = Math.round((eventDay - today) / 86400000);
+
+      if (diffDays < 0) overdueCount += 1;
+      else if (diffDays === 0) todayCount += 1;
+      else if (diffDays <= 7) nextSevenCount += 1;
+    });
+
+    return { overdueCount, todayCount, nextSevenCount };
+  }, [activeEvents]);
+
   const renderActiveEventCard = (event) => {
     const horseLabel =
       event.horseId === null
@@ -392,10 +446,11 @@ export default function EventsPage({ user, horses = [], onAsk }) {
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const eventDateObj = new Date(event.eventDate || 0);
     const eventDay = new Date(
-      new Date(event.eventDate || 0).getFullYear(),
-      new Date(event.eventDate || 0).getMonth(),
-      new Date(event.eventDate || 0).getDate()
+      eventDateObj.getFullYear(),
+      eventDateObj.getMonth(),
+      eventDateObj.getDate()
     ).getTime();
 
     const diffDays = Math.round((eventDay - today) / 86400000);
@@ -406,7 +461,7 @@ export default function EventsPage({ user, horses = [], onAsk }) {
 
     if (diffDays < 0) {
       statusText = "Past Due";
-      statusBg = "#F2E8E7";
+      statusBg = blushBg;
       statusColor = burgundy;
     } else if (diffDays === 0) {
       statusText = "Today";
@@ -425,6 +480,8 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         style={{
           padding: 18,
           background: "#FCFBF8",
+          borderRadius: 18,
+          border: `1px solid ${borderColor}`,
         }}
       >
         <div
@@ -441,8 +498,9 @@ export default function EventsPage({ user, horses = [], onAsk }) {
               {event.name || "Unnamed event"}
             </div>
 
-            <div style={{ fontSize: 14, color: secondaryText, marginTop: 6 }}>
-              {formatEventDate(event.eventDate)} · {horseLabel}
+            <div style={{ fontSize: 14, color: secondaryText, marginTop: 6, lineHeight: 1.5 }}>
+              {formatEventDate(event.eventDate)}
+              {event.time ? ` at ${event.time}` : ""} · {horseLabel}
               {event.location ? ` · ${event.location}` : ""}
             </div>
 
@@ -540,29 +598,124 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         </div>
       </div>
 
+      <div style={{ marginTop: 18 }}>
+        <div
+          style={{
+            padding: 20,
+            borderRadius: 22,
+            border: `1px solid ${navyBorder}`,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            boxShadow: panelShadow,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 14,
+              opacity: 0.82,
+            }}
+          >
+            Event Overview
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 30,
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            {activeEvents.length}
+          </div>
+
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 15,
+              lineHeight: 1.5,
+              opacity: 0.92,
+            }}
+          >
+            {upcomingSummary.overdueCount > 0
+              ? `${upcomingSummary.overdueCount} past due · ${upcomingSummary.todayCount} today · ${upcomingSummary.nextSevenCount} within 7 days`
+              : `${upcomingSummary.todayCount} today · ${upcomingSummary.nextSevenCount} within 7 days · ${completedEvents.length} completed`}
+          </div>
+        </div>
+      </div>
+
       <div style={{ marginTop: 22 }}>
         <button
           onClick={openAdd}
           style={{
             width: "100%",
-            border: `1px solid ${borderColor}`,
-            borderRadius: 18,
+            border: `1px solid ${navyBorder}`,
+            borderRadius: 20,
             padding: "18px 20px",
-            background: "#FBF8F2",
-            color: "#6E5A36",
-            fontWeight: 500,
+            background: "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
+            color: "#FFFFFF",
+            fontWeight: 600,
             fontSize: 18,
             cursor: "pointer",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+            boxShadow: panelShadow,
+            letterSpacing: "-0.01em",
+          }}
+          onMouseDown={(e) => {
+            e.currentTarget.style.background = navyPressed;
+            e.currentTarget.style.transform = "scale(0.995)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
+            e.currentTarget.style.transform = "scale(1)";
           }}
         >
           + Add Event
         </button>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
-        <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
-          Upcoming / Active Events
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
+            Upcoming / Active Events
+          </div>
+
+          {upcomingSummary.todayCount > 0 ? (
+            <div
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: goldBg,
+                color: goldText,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {upcomingSummary.todayCount} today
+            </div>
+          ) : null}
         </div>
 
         <div style={{ marginTop: 8, fontSize: 14, color: secondaryText }}>
@@ -582,7 +735,17 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
         <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
           Completed Event Filters
         </div>
@@ -669,7 +832,17 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 18, padding: 18 }}>
+      <div
+        className="card"
+        style={{
+          marginTop: 18,
+          padding: 18,
+          borderRadius: 22,
+          border: `1px solid ${borderColor}`,
+          background: "#FFFFFF",
+          boxShadow: cardShadow,
+        }}
+      >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 26, fontWeight: 600, color: primaryText }}>
@@ -723,8 +896,9 @@ export default function EventsPage({ user, horses = [], onAsk }) {
                               {event.name || "Unnamed event"}
                             </div>
 
-                            <div style={{ fontSize: 14, color: secondaryText, marginTop: 4 }}>
-                              {formatEventDate(event.eventDate)} · {horseLabel}
+                            <div style={{ fontSize: 14, color: secondaryText, marginTop: 4, lineHeight: 1.5 }}>
+                              {formatEventDate(event.eventDate)}
+                              {event.time ? ` at ${event.time}` : ""} · {horseLabel}
                               {event.location ? ` · ${event.location}` : ""}
                             </div>
 
@@ -846,6 +1020,26 @@ export default function EventsPage({ user, horses = [], onAsk }) {
               onChange={(e) => setEventDate(e.target.value)}
               style={{ marginTop: 10 }}
             />
+
+            <input
+              className="field-input"
+              type="time"
+              value={eventTime}
+              onChange={(e) => setEventTime(e.target.value)}
+              style={{ marginTop: 10 }}
+            />
+
+            <select
+              className="field-select"
+              value={eventReminder}
+              onChange={(e) => setEventReminder(e.target.value)}
+              style={{ marginTop: 10 }}
+            >
+              <option value="none">No Reminder</option>
+              <option value="1day">1 Day Before</option>
+              <option value="2day">2 Days Before</option>
+              <option value="1week">1 Week Before</option>
+            </select>
 
             <textarea
               className="field-textarea"

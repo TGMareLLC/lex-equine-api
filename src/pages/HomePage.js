@@ -127,14 +127,6 @@ function DocumentsIcon() {
   );
 }
 
-const formatDate = (value) => {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString([], {
-    month: "long",
-    day: "numeric",
-  });
-};
-
 const getDaysUntil = (value) => {
   if (!value) return null;
 
@@ -145,6 +137,10 @@ const getDaysUntil = (value) => {
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
 
   return Math.round((dueDay - today) / 86400000);
+};
+
+const getHorseId = (item) => {
+  return item?.horseId || item?.selectedHorseId || item?.horse?.id || null;
 };
 
 export default function HomePage({ user, horses = [], onAsk }) {
@@ -165,15 +161,12 @@ export default function HomePage({ user, horses = [], onAsk }) {
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
   const navyPressed = "#1B2538";
+  const navyBorder = "#31425F";
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const burgundy = "#7A2E2E";
   const upcomingGoldText = "#6E5A36";
   const upcomingGoldBg = "#F5EEDB";
-
-  const sickWatchHorses = useMemo(() => {
-    return (horses || []).filter((h) => h.sickWatchOn);
-  }, [horses]);
 
   useEffect(() => {
     const loadHomeData = async () => {
@@ -221,56 +214,70 @@ export default function HomePage({ user, horses = [], onAsk }) {
     loadHomeData();
   }, [user]);
 
-  const nextUpcomingReminder = useMemo(() => {
+  const urgentCards = useMemo(() => {
+    const grouped = {};
     const now = Date.now();
     const threeDaysFromNow = now + 3 * 24 * 60 * 60 * 1000;
 
-    return (
-      activeReminders.find((item) => {
-        const due = item?.dueDate || 0;
-        return due >= now && due <= threeDaysFromNow;
-      }) || null
-    );
-  }, [activeReminders]);
+    (horses || []).forEach((horse) => {
+      if (!horse?.id) return;
 
-  const nextThreeDayEvent = useMemo(() => {
-    return (
-      activeEvents.find((event) => {
-        const days = getDaysUntil(event.eventDate);
-        return days === 3;
-      }) || null
-    );
-  }, [activeEvents]);
-
-  const urgentCards = useMemo(() => {
-    const cards = [];
-
-    sickWatchHorses.forEach((horse) => {
-      cards.push({
-        type: "sickwatch",
-        key: `sickwatch-${horse.id}`,
+      grouped[horse.id] = {
         horse,
-      });
+        sickWatch: horse.sickWatchOn ? horse : null,
+        reminder: null,
+        event: null,
+      };
     });
 
-    if (nextUpcomingReminder) {
-      cards.push({
-        type: "care",
-        key: `care-${nextUpcomingReminder.id}`,
-        reminder: nextUpcomingReminder,
-      });
-    }
+    activeReminders.forEach((item) => {
+      const horseId = getHorseId(item);
+      if (!horseId) return;
 
-    if (nextThreeDayEvent) {
-      cards.push({
-        type: "event",
-        key: `event-${nextThreeDayEvent.id}`,
-        event: nextThreeDayEvent,
-      });
-    }
+      const due = item?.dueDate || 0;
+      if (due < now || due > threeDaysFromNow) return;
 
-    return cards;
-  }, [sickWatchHorses, nextUpcomingReminder, nextThreeDayEvent]);
+      if (!grouped[horseId]) {
+        grouped[horseId] = {
+          horse: { id: horseId, name: item.horseName || "Unnamed" },
+          sickWatch: null,
+          reminder: null,
+          event: null,
+        };
+      }
+
+      const existing = grouped[horseId].reminder;
+      if (!existing || due < (existing.dueDate || 0)) {
+        grouped[horseId].reminder = item;
+      }
+    });
+
+    activeEvents.forEach((event) => {
+      const horseId = getHorseId(event);
+      if (!horseId) return;
+
+      const days = getDaysUntil(event.eventDate);
+      if (days !== 3) return;
+
+      if (!grouped[horseId]) {
+        grouped[horseId] = {
+          horse: { id: horseId, name: event.horseName || "Unnamed" },
+          sickWatch: null,
+          reminder: null,
+          event: null,
+        };
+      }
+
+      const existing = grouped[horseId].event;
+      if (!existing || (event.eventDate || 0) < (existing.eventDate || 0)) {
+        grouped[horseId].event = event;
+      }
+    });
+
+    return Object.values(grouped)
+      .filter((item) => item.sickWatch || item.reminder || item.event)
+      .sort((a, b) => (a.horse?.name || "").localeCompare(b.horse?.name || ""));
+  }, [horses, activeReminders, activeEvents]);
 
   const openAskLex = () => {
     setIsAskLexOpen(true);
@@ -344,35 +351,27 @@ export default function HomePage({ user, horses = [], onAsk }) {
     navigate("/account");
   };
 
-  const openSubscriptionBilling = () => {
-    setIsMenuOpen(false);
-    alert("Subscription & Billing coming soon.");
-  };
-
   const openPrivacyPolicy = () => {
     setIsMenuOpen(false);
-    alert("Add your Privacy Policy URL before Apple submission.");
-  };
-
-  const openTerms = () => {
-    setIsMenuOpen(false);
-    alert("Add your Terms & Disclaimers URL before Apple submission.");
+    window.open("https://lexequine.com/#privacy", "_blank");
   };
 
   const tileBaseStyle = {
-    minHeight: 148,
-    borderRadius: 22,
-    border: `1px solid ${navy}`,
+    minHeight: 154,
+    borderRadius: 24,
+    border: `1px solid ${navyBorder}`,
     background: navy,
     color: "#FFFFFF",
-    boxShadow: "0 10px 22px rgba(0,0,0,0.08)",
+    boxShadow: "0 12px 24px rgba(24, 34, 51, 0.14)",
     padding: 20,
     display: "flex",
     flexDirection: "column",
     justifyContent: "space-between",
-    alignItems: "center",
-    textAlign: "center",
+    alignItems: "flex-start",
+    textAlign: "left",
     cursor: "pointer",
+    position: "relative",
+    overflow: "hidden",
   };
 
   const tiles = [
@@ -382,6 +381,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Profiles",
       icon: <HorsesIcon />,
       onClick: () => navigate("/horses"),
+      featured: false,
     },
     {
       key: "sickwatch",
@@ -389,6 +389,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Monitoring",
       icon: <SickWatchIcon />,
       onClick: () => navigate("/sick-watch"),
+      featured: false,
     },
     {
       key: "care",
@@ -396,6 +397,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Schedule",
       icon: <CareIcon />,
       onClick: () => navigate("/care"),
+      featured: false,
     },
     {
       key: "costs",
@@ -403,6 +405,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Tracking",
       icon: <CostsIcon />,
       onClick: () => navigate("/costs"),
+      featured: false,
     },
     {
       key: "events",
@@ -410,6 +413,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Competitions",
       icon: <EventsIcon />,
       onClick: () => navigate("/events"),
+      featured: false,
     },
     {
       key: "resources",
@@ -417,6 +421,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Nearby help",
       icon: <ResourcesIcon />,
       onClick: () => navigate("/resources"),
+      featured: false,
     },
     {
       key: "documents",
@@ -424,6 +429,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Paperwork",
       icon: <DocumentsIcon />,
       onClick: () => navigate("/documents"),
+      featured: false,
     },
     {
       key: "asklex",
@@ -431,6 +437,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       subtitle: "Ask anything",
       icon: <AskLexIcon />,
       onClick: openAskLex,
+      featured: true,
     },
   ];
 
@@ -482,9 +489,9 @@ export default function HomePage({ user, horses = [], onAsk }) {
             onClick={() => setIsMenuOpen(true)}
             style={{
               border: `1px solid ${borderColor}`,
-              borderRadius: 12,
-              width: 46,
-              height: 46,
+              borderRadius: 14,
+              width: 48,
+              height: 48,
               background: "#FFFFFF",
               color: primaryText,
               cursor: "pointer",
@@ -499,191 +506,107 @@ export default function HomePage({ user, horses = [], onAsk }) {
             <Menu size={22} strokeWidth={2} />
           </button>
         ) : null}
+
       </div>
 
       {urgentCards.length > 0 ? (
-        <div style={{ marginTop: 22, display: "grid", gap: 14 }}>
+        <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
           {urgentCards.map((card) => {
-            if (card.type === "sickwatch") {
-              const horse = card.horse;
+            const horse = card.horse;
+            const horseName = horse?.name || "Unnamed";
 
-              return (
+            return (
+              <div
+                key={horse.id}
+                onClick={() => {
+                  if (card.sickWatch) {
+                    navigate(`/sick-watch?horseId=${horse.id}`);
+                    return;
+                  }
+                  if (card.reminder) {
+                    navigate("/care");
+                    return;
+                  }
+                  if (card.event) {
+                    navigate("/events");
+                  }
+                }}
+                style={{
+                  background: cardBg,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 18,
+                  padding: "14px 16px",
+                  boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+                  cursor: "pointer",
+                  overflow: "hidden",
+                }}
+              >
                 <div
-                  key={card.key}
-                  onClick={() => navigate(`/sick-watch?horseId=${horse.id}`)}
                   style={{
-                    background: cardBg,
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: 18,
-                    padding: 18,
-                    boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-                    position: "relative",
-                    cursor: "pointer",
-                    overflow: "hidden",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginBottom: 10,
                   }}
                 >
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      right: 0,
-                      background: "#F2E8E7",
-                      color: burgundy,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      padding: "12px 18px 12px 22px",
-                      borderBottomLeftRadius: 18,
-                    }}
-                  >
-                    Sick Watch Active
-                  </div>
+                  {card.sickWatch ? (
+                    <div
+                      style={{
+                        background: "#F2E8E7",
+                        color: burgundy,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      Active Sick Watch
+                    </div>
+                  ) : null}
 
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: 600,
-                      color: primaryText,
-                      paddingRight: 150,
-                    }}
-                  >
-                    {horse.name || "Unnamed"}
-                  </div>
+                  {card.reminder ? (
+                    <div
+                      style={{
+                        background: upcomingGoldBg,
+                        color: upcomingGoldText,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      Upcoming Care
+                    </div>
+                  ) : null}
 
-                  <div
-                    style={{
-                      marginTop: 10,
-                      fontSize: 15,
-                      color: secondaryText,
-                    }}
-                  >
-                    Tap to view this horse’s Sick Watch
-                  </div>
+                  {card.event ? (
+                    <div
+                      style={{
+                        background: upcomingGoldBg,
+                        color: upcomingGoldText,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      Event Reminder
+                    </div>
+                  ) : null}
                 </div>
-              );
-            }
 
-            if (card.type === "care") {
-              const item = card.reminder;
-              const horseName = item.horseName || "Unnamed";
-
-              return (
                 <div
-                  key={card.key}
-                  onClick={() => navigate("/care")}
                   style={{
-                    background: cardBg,
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: 18,
-                    padding: 18,
-                    boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-                    position: "relative",
-                    cursor: "pointer",
-                    overflow: "hidden",
+                    fontSize: 22,
+                    fontWeight: 600,
+                    color: primaryText,
+                    lineHeight: 1.15,
                   }}
                 >
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      right: 0,
-                      background: upcomingGoldBg,
-                      color: upcomingGoldText,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      padding: "12px 18px 12px 22px",
-                      borderBottomLeftRadius: 18,
-                    }}
-                  >
-                    Upcoming Appointment
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: 600,
-                      color: primaryText,
-                      paddingRight: 185,
-                    }}
-                  >
-                    Next Appt
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 10,
-                      fontSize: 15,
-                      color: secondaryText,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {horseName} — {item.title || item.type || "Care Item"} —{" "}
-                    {formatDate(item.dueDate)}
-                  </div>
+                  {horseName}
                 </div>
-              );
-            }
-
-            if (card.type === "event") {
-              const event = card.event;
-
-              return (
-                <div
-                  key={card.key}
-                  onClick={() => navigate("/events")}
-                  style={{
-                    background: cardBg,
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: 18,
-                    padding: 18,
-                    boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-                    position: "relative",
-                    cursor: "pointer",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      right: 0,
-                      background: upcomingGoldBg,
-                      color: upcomingGoldText,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      padding: "12px 18px 12px 22px",
-                      borderBottomLeftRadius: 18,
-                    }}
-                  >
-                    Event Reminder
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: 600,
-                      color: primaryText,
-                      paddingRight: 165,
-                    }}
-                  >
-                    {event.name || "Event"}
-                  </div>
-
-                  <div
-                    style={{
-                      marginTop: 10,
-                      fontSize: 15,
-                      color: secondaryText,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {(event.name || "Event")} — 3 Days
-                    {event.location ? ` — ${event.location}` : ""}
-                  </div>
-                </div>
-              );
-            }
-
-            return null;
+              </div>
+            );
           })}
         </div>
       ) : null}
@@ -701,40 +624,68 @@ export default function HomePage({ user, horses = [], onAsk }) {
           <button
             key={tile.key}
             onClick={tile.onClick}
-            style={tileBaseStyle}
+            style={{
+              ...tileBaseStyle,
+              background: tile.featured
+                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
+                : navy,
+            }}
             onMouseDown={(e) => {
-              e.currentTarget.style.background = navyPressed;
+              e.currentTarget.style.background = tile.featured
+                ? "linear-gradient(180deg, #273650 0%, #1B2538 100%)"
+                : navyPressed;
               e.currentTarget.style.transform = "scale(0.985)";
             }}
             onMouseUp={(e) => {
-              e.currentTarget.style.background = navy;
+              e.currentTarget.style.background = tile.featured
+                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
+                : navy;
               e.currentTarget.style.transform = "scale(1)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = navy;
+              e.currentTarget.style.background = tile.featured
+                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
+                : navy;
               e.currentTarget.style.transform = "scale(1)";
             }}
           >
             <div
               style={{
-                width: 42,
-                height: 42,
+                position: "absolute",
+                inset: 0,
+                pointerEvents: "none",
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 42%)",
+              }}
+            />
+
+            <div
+              style={{
+                width: 50,
+                height: 50,
+                borderRadius: 16,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                marginTop: 2,
+                background: "rgba(255,255,255,0.09)",
+                color: "#FFFFFF",
+                border: "1px solid rgba(255,255,255,0.08)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
+                position: "relative",
+                zIndex: 1,
               }}
             >
               {tile.icon}
             </div>
 
-            <div>
+            <div style={{ position: "relative", zIndex: 1 }}>
               <div
                 style={{
                   fontSize: 24,
                   fontWeight: 600,
                   lineHeight: 1.1,
                   color: "#FFFFFF",
+                  letterSpacing: "-0.02em",
                 }}
               >
                 {tile.title}
@@ -744,8 +695,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
                 style={{
                   marginTop: 8,
                   fontSize: 14,
-                  opacity: 0.92,
-                  color: "#FFFFFF",
+                  color: "rgba(255,255,255,0.82)",
                 }}
               >
                 {tile.subtitle}
@@ -776,16 +726,8 @@ export default function HomePage({ user, horses = [], onAsk }) {
                 Manage Account
               </button>
 
-              <button className="secondary-button" onClick={openSubscriptionBilling}>
-                Subscription & Billing
-              </button>
-
               <button className="secondary-button" onClick={openPrivacyPolicy}>
-                Privacy Policy
-              </button>
-
-              <button className="secondary-button" onClick={openTerms}>
-                Terms & Disclaimers
+                Privacy Policy/Terms & Disclaimers
               </button>
 
               <button
@@ -863,7 +805,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
                   padding: 16,
                   border: `1px solid ${borderColor}`,
                   borderRadius: 16,
-                  background: "#FCFBF8",
+                  background: "#FFFFFF",
                 }}
               >
                 <div

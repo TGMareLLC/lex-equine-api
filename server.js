@@ -346,6 +346,48 @@ ${recentHealthLogs || "No recent health logs found."}
 RECENT NOTES
 ${recentLogs || "No recent notes found."}
 `;
+
+      const eventsSnap = await firestore
+        .collection("events")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("eventDate", "asc")
+        .limit(5)
+        .get();
+
+      const upcomingEvents = eventsSnap.docs
+        .map((doc) => {
+          const e = doc.data();
+
+          return `- ${e.name || "Event"} on ${e.eventDate ? new Date(e.eventDate).toLocaleDateString() : "Unknown date"} at ${e.location || "Unknown location"}`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+UPCOMING EVENTS
+${upcomingEvents || "No upcoming events found."}
+`;
+
+      const documentsSnap = await firestore
+        .collection("documents")
+        .where("horseId", "==", activeHorseId)
+        .orderBy("createdAt", "desc")
+        .limit(5)
+        .get();
+
+      const recentDocuments = documentsSnap.docs
+        .map((doc) => {
+          const d = doc.data();
+
+          return `- ${d.documentName || "Document"} (${d.documentType || "Unknown type"})`;
+        })
+        .join("\n");
+
+      horseContext += `
+
+DOCUMENTS
+${recentDocuments || "No documents found."}
+`;
     }
 
     const systemPrompt = `

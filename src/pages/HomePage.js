@@ -5,6 +5,7 @@ import { Clock, Menu } from "lucide-react";
 import { db, auth } from "../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import lexHorseIcon from "../assets/lex-horse-icon.png";
+import FloatingAskLex from "../components/FloatingAskLex";
 
 function AskLexIcon() {
   return (
@@ -142,12 +143,150 @@ const getDaysUntil = (value) => {
 const getHorseId = (item) => {
   return item?.horseId || item?.selectedHorseId || item?.horse?.id || null;
 };
+const formatShortDate = (value) => {
+  if (!value) return "";
+
+  const date = new Date(value);
+  const today = new Date();
+  const tomorrow = new Date();
+
+  tomorrow.setDate(today.getDate() + 1);
+
+  const isToday = date.toDateString() === today.toDateString();
+  const isTomorrow = date.toDateString() === tomorrow.toDateString();
+
+  if (isToday) return "Today";
+  if (isTomorrow) return "Tomorrow";
+
+  return date.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const formatTaskTime = (time) => {
+  if (!time) return "";
+
+  const [hourRaw, minute = "00"] = String(time).split(":");
+  const hour = Number(hourRaw);
+
+  if (Number.isNaN(hour)) return "";
+
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${minute} ${suffix}`;
+};
+
+const formatWeatherTime = (timestamp) => {
+  if (!timestamp) return "";
+
+  return new Date(timestamp * 1000).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const getWeatherEmoji = (condition) => {
+  const value = String(condition || "").toLowerCase();
+
+  if (value.includes("rain")) return "🌧";
+  if (value.includes("storm")) return "⛈";
+  if (value.includes("cloud")) return "☁️";
+  if (value.includes("snow")) return "❄️";
+  if (value.includes("clear")) return "☀️";
+  if (value.includes("sun")) return "☀️";
+  if (value.includes("fog")) return "🌫";
+  if (value.includes("mist")) return "🌫";
+
+  return "🌤";
+};
+
+const getTodayHourlyWeather = (weatherData) => {
+  if (!weatherData?.hourly?.length) return [];
+
+  const now = new Date();
+
+  return weatherData.hourly.filter((hour) => {
+    const hourDate = new Date(hour.dt * 1000);
+
+    return (
+      hourDate.getFullYear() === now.getFullYear() &&
+      hourDate.getMonth() === now.getMonth() &&
+      hourDate.getDate() === now.getDate()
+    );
+  });
+};
+
+const getWeatherTiming = (weatherData) => {
+  const hours = getTodayHourlyWeather(weatherData);
+
+  if (!hours.length) {
+    return {
+      highTime: "",
+      lowTime: "",
+      rainTime: "",
+    };
+  }
+
+  const highHour = hours.reduce((highest, hour) =>
+    hour.temp > highest.temp ? hour : highest
+  );
+
+  const lowHour = hours.reduce((lowest, hour) =>
+    hour.temp < lowest.temp ? hour : lowest
+  );
+
+  const rainHour = hours.find((hour) => {
+    const pop = Number(hour.pop || 0);
+    const rainAmount = Number(hour.rain?.["1h"] || 0);
+    return pop >= 0.3 || rainAmount > 0;
+  });
+
+  return {
+    highTime: formatWeatherTime(highHour.dt),
+    lowTime: formatWeatherTime(lowHour.dt),
+    rainTime: rainHour ? formatWeatherTime(rainHour.dt) : "",
+  };
+};
+
+const getNextRainHour = (weatherData) => {
+  if (!weatherData?.hourly?.length) return null;
+
+  return weatherData.hourly.find((hour) => {
+    const pop = Number(hour.pop || 0);
+    const rainAmount = Number(hour.rain?.["1h"] || 0);
+
+    return pop >= 0.3 || rainAmount > 0;
+  });
+};
+
+const getFirstHourAtOrBelowTemp = (weatherData, threshold) => {
+  if (!weatherData?.hourly?.length || threshold === "" || threshold == null) {
+    return null;
+  }
+
+  const thresholdNumber = Number(threshold);
+
+  if (Number.isNaN(thresholdNumber)) return null;
+
+  return weatherData.hourly.find((hour) => {
+    return Number(hour.temp) <= thresholdNumber;
+  });
+};
 
 export default function HomePage({ user, horses = [], onAsk }) {
   const navigate = useNavigate();
 
   const [activeReminders, setActiveReminders] = useState([]);
   const [activeEvents, setActiveEvents] = useState([]);
+  const [feedInventoryItems, setFeedInventoryItems] = useState([]);
+  const [weatherData, setWeatherData] = useState(null);
+const [weatherStatus, setWeatherStatus] = useState("");
+const [weatherLocation, setWeatherLocation] = useState(null);
+const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
+  const [homeDataStatus, setHomeDataStatus] = useState("");
 
   const [isAskLexOpen, setIsAskLexOpen] = useState(false);
   const [lexQuestion, setLexQuestion] = useState("");
@@ -168,13 +307,38 @@ export default function HomePage({ user, horses = [], onAsk }) {
   const upcomingGoldText = "#6E5A36";
   const upcomingGoldBg = "#F5EEDB";
 
+  const currentTemp = Math.round(weatherData?.current?.temp || 0);
+
+const todayHigh = Math.round(weatherData?.daily?.[0]?.temp?.max || 0);
+
+const todayLow = Math.round(weatherData?.daily?.[0]?.temp?.min || 0);
+
+const currentWeather =
+  weatherData?.current?.weather?.[0]?.main || "Weather";
+
+const windSpeed = Math.round(weatherData?.current?.wind_speed || 0);
+
+const rainChance = Math.round(
+  (weatherData?.daily?.[0]?.pop || 0) * 100
+);
+
+const weatherTiming = getWeatherTiming(weatherData);
+
+const highTime = weatherTiming.highTime;
+const lowTime = weatherTiming.lowTime;
+const rainTime = weatherTiming.rainTime;
+
+const todayHourlyWeather = getTodayHourlyWeather(weatherData).slice(0, 24);
+
   useEffect(() => {
     const loadHomeData = async () => {
       if (!user?.uid) {
-        setActiveReminders([]);
-        setActiveEvents([]);
-        return;
-      }
+  setActiveReminders([]);
+  setActiveEvents([]);
+  setFeedInventoryItems([]);
+  setHomeDataStatus("");
+  return;
+}
 
       try {
         const reminderQuery = query(
@@ -183,16 +347,22 @@ export default function HomePage({ user, horses = [], onAsk }) {
           where("completed", "==", false)
         );
 
+        const feedQuery = query(
+  collection(db, "feed_inventory"),
+  where("ownerUid", "==", user.uid)
+);
+
         const eventQuery = query(
           collection(db, "events"),
           where("ownerUid", "==", user.uid),
           where("completed", "==", false)
         );
 
-        const [reminderSnap, eventSnap] = await Promise.all([
-          getDocs(reminderQuery),
-          getDocs(eventQuery),
-        ]);
+        const [reminderSnap, eventSnap, feedSnap] = await Promise.all([
+  getDocs(reminderQuery),
+  getDocs(eventQuery),
+  getDocs(feedQuery),
+]);
 
         const reminderItems = reminderSnap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
@@ -201,18 +371,105 @@ export default function HomePage({ user, horses = [], onAsk }) {
         const eventItems = eventSnap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.eventDate || 0) - (b.eventDate || 0));
+          const feedItems = feedSnap.docs
+  .map((d) => ({ id: d.id, ...d.data() }))
+  .sort((a, b) => {
+    const aDays = a.estimatedDaysRemaining ?? 999;
+    const bDays = b.estimatedDaysRemaining ?? 999;
+    return aDays - bDays;
+  });
 
         setActiveReminders(reminderItems);
-        setActiveEvents(eventItems);
+setActiveEvents(eventItems);
+setFeedInventoryItems(feedItems);
+setHomeDataStatus("");
       } catch (e) {
         console.log("HOME DATA LOAD ERROR:", e);
         setActiveReminders([]);
-        setActiveEvents([]);
+setActiveEvents([]);
+setFeedInventoryItems([]);
+setHomeDataStatus("Could not load homepage data.");
       }
     };
 
     loadHomeData();
   }, [user]);
+
+  const loadWeather = async (coords) => {
+  const apiKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
+
+  if (!apiKey) {
+    setWeatherStatus("Weather API key missing.");
+    setWeatherData(null);
+    return;
+  }
+
+  try {
+    setWeatherStatus("Loading weather...");
+
+    const latitude = coords?.latitude;
+const longitude = coords?.longitude;
+
+if (!latitude || !longitude) {
+  setWeatherStatus("Location needed for weather.");
+  setWeatherData(null);
+  return;
+}
+
+    const response = await fetch(
+      `https://api.openweathermap.org/data/3.0/onecall?lat=${latitude}&lon=${longitude}&exclude=minutely&units=imperial&appid=${apiKey}`
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+throw new Error(`Weather request failed: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    setWeatherData(data);
+    setWeatherStatus("");
+  } catch (e) {
+    console.log("LOAD WEATHER ERROR:", e?.message || e);
+alert(e?.message || "Weather error");
+    setWeatherData(null);
+    setWeatherStatus("Could not load weather.");
+  }
+};
+
+useEffect(() => {
+  if (!navigator.geolocation) {
+    setWeatherStatus("Location is not supported on this device.");
+    setWeatherData(null);
+    return;
+  }
+
+  setWeatherStatus("Getting location...");
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const coords = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+
+      setWeatherLocation(coords);
+      loadWeather(coords);
+    },
+    (error) => {
+      console.log("LOCATION ERROR:", error);
+      setWeatherStatus("Location access is needed for weather.");
+      setWeatherData(null);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000,
+    }
+  );
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   const urgentCards = useMemo(() => {
     const grouped = {};
@@ -278,6 +535,138 @@ export default function HomePage({ user, horses = [], onAsk }) {
       .filter((item) => item.sickWatch || item.reminder || item.event)
       .sort((a, b) => (a.horse?.name || "").localeCompare(b.horse?.name || ""));
   }, [horses, activeReminders, activeEvents]);
+
+  const upcomingTasks = useMemo(() => {
+  const reminderTasks = activeReminders.map((item) => ({
+    id: item.id,
+    type: "reminder",
+    horseName: item.horseName || "Unnamed",
+    title: item.title || item.type || "Care Item",
+    date: item.dueDate,
+    time: item.time || "",
+  }));
+
+  const eventTasks = activeEvents.map((event) => ({
+    id: event.id,
+    type: "event",
+    horseName: event.horseName || "Unnamed",
+    title: event.title || event.eventType || "Event",
+    date: event.eventDate,
+    time: event.time || "",
+  }));
+
+  return [...reminderTasks, ...eventTasks]
+  .filter((item) => {
+    const days = getDaysUntil(item.date);
+    return days != null && days >= -999 && days <= 3;
+  })
+  .sort((a, b) => (a.date || 0) - (b.date || 0))
+  .slice(0, 3);
+}, [activeReminders, activeEvents]);
+
+const urgentAlerts = useMemo(() => {
+  const alerts = [];
+
+  horses.forEach((horse) => {
+    if (!horse?.blanketingEnabled || !weatherData) return;
+
+    const horseName = horse.name || "Unnamed";
+
+    if (horse.rainSheetEnabled) {
+      const rainHour = getNextRainHour(weatherData);
+
+      if (rainHour) {
+        alerts.push({
+          id: `rain-${horse.id}`,
+          type: "blanket-rain",
+          title: "Rain Sheet Recommended",
+          detail: `${horseName} may need a rain sheet around ${formatWeatherTime(rainHour.dt)}.`,
+          route: "/horses",
+        });
+      }
+    }
+
+    if (horse.heavyweightEnabled) {
+      const heavyThreshold = Number(horse.heavyweightTemp);
+
+      if (!Number.isNaN(heavyThreshold) && todayLow <= heavyThreshold) {
+        alerts.push({
+          id: `heavy-${horse.id}`,
+          type: "blanket-heavy",
+          title: "Heavyweight Blanket Recommended",
+          detail: `${horseName} may need a heavyweight blanket around ${lowTime || "tonight"}. Forecast low: ${todayLow}°.`,
+          route: "/horses",
+        });
+
+        return;
+      }
+    }
+
+    if (horse.midweightEnabled) {
+      const midThreshold = Number(horse.midweightTemp);
+
+      if (!Number.isNaN(midThreshold) && todayLow <= midThreshold) {
+        alerts.push({
+          id: `mid-${horse.id}`,
+          type: "blanket-mid",
+          title: "Midweight Blanket Recommended",
+          detail: `${horseName} may need a midweight blanket around ${lowTime || "tonight"}. Forecast low: ${todayLow}°.`,
+          route: "/horses",
+        });
+      }
+    }
+  });
+
+  horses.forEach((horse) => {
+    if (horse?.sickWatchOn) {
+      alerts.push({
+        id: `sick-${horse.id}`,
+        type: "sickwatch",
+        title: "Active Sick Watch",
+        detail: `${horse.name || "Unnamed"} is currently being monitored.`,
+        route: `/sick-watch?horseId=${horse.id}`,
+      });
+    }
+  });
+
+  feedInventoryItems.forEach((item) => {
+    const days = item.estimatedDaysRemaining;
+
+    if (days != null && days <= (item.lowThresholdDays || 3)) {
+      alerts.push({
+        id: `feed-${item.id}`,
+        type: "feed",
+        title: days <= 0 ? "Feed Supply Empty" : "Low Feed Supply",
+        detail: `${item.horseName || "Unnamed"} — ${item.itemName || "Feed item"}: about ${days} day(s) remaining.`,
+        route: "/horses",
+      });
+    }
+  });
+
+  activeReminders.forEach((item) => {
+    const days = getDaysUntil(item.dueDate);
+
+    if (days != null && days < 0) {
+      alerts.push({
+        id: `overdue-${item.id}`,
+        type: "overdue",
+        title: "Overdue Care",
+        detail: `${item.horseName || "Unnamed"} — ${item.title || item.type || "Care item"} was due ${Math.abs(days)} day(s) ago.`,
+        route: "/care",
+      });
+    }
+  });
+
+  return alerts.slice(0, 6);
+}, [horses, feedInventoryItems, activeReminders, weatherData]);
+
+const openWeatherModal = () => {
+  setIsWeatherModalOpen(true);
+};
+
+const closeWeatherModal = () => {
+  setIsWeatherModalOpen(false);
+};
 
   const openAskLex = () => {
     setIsAskLexOpen(true);
@@ -431,14 +820,7 @@ export default function HomePage({ user, horses = [], onAsk }) {
       onClick: () => navigate("/documents"),
       featured: false,
     },
-    {
-      key: "asklex",
-      title: "Ask Lex",
-      subtitle: "Ask anything",
-      icon: <AskLexIcon />,
-      onClick: openAskLex,
-      featured: true,
-    },
+  
   ];
 
   return (
@@ -508,6 +890,339 @@ export default function HomePage({ user, horses = [], onAsk }) {
         ) : null}
 
       </div>
+
+      
+     <div
+  style={{
+    marginTop: 22,
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 12,
+    alignItems: "stretch",
+  }}
+>
+  <div
+  onClick={openWeatherModal}
+  style={{
+    background: cardBg,
+    cursor: "pointer",
+      border: `1px solid ${borderColor}`,
+      borderRadius: 20,
+      padding: 14,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.04)",
+    }}
+  >
+    <div
+      style={{
+        fontSize: 18,
+        fontWeight: 700,
+        color: primaryText,
+        marginBottom: 8,
+      }}
+    >
+      Weather
+    </div>
+
+    {weatherStatus ? (
+      <div style={{ fontSize: 14, color: secondaryText }}>
+        {weatherStatus}
+      </div>
+    ) : weatherData ? (
+      <>
+        <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  }}
+>
+  <div
+    style={{
+      fontSize: 34,
+      fontWeight: 700,
+      color: navy,
+      lineHeight: 1,
+    }}
+  >
+    {currentTemp}°
+  </div>
+
+  <div
+    style={{
+      fontSize: 14,
+      color: secondaryText,
+      textAlign: "right",
+      marginTop: 4,
+    }}
+  >
+    {currentWeather}
+  </div>
+</div>
+
+<div
+  style={{
+    marginTop: 10,
+    fontSize: 14,
+    color: secondaryText,
+    lineHeight: 1.5,
+  }}
+>
+  High {todayHigh}° {highTime ? `at ${highTime}` : ""}
+</div>
+
+<div
+  style={{
+    fontSize: 14,
+    color: secondaryText,
+    lineHeight: 1.5,
+  }}
+>
+  Low {todayLow}° {lowTime ? `at ${lowTime}` : ""}
+</div>
+
+        <div
+  style={{
+    marginTop: 10,
+    fontSize: 13,
+    color: secondaryText,
+    lineHeight: 1.5,
+  }}
+>
+  Wind {windSpeed} mph
+</div>
+
+<div
+  style={{
+    fontSize: 13,
+    color: secondaryText,
+    lineHeight: 1.5,
+  }}
+>
+  Rain {rainChance}%
+  {rainTime ? ` around ${rainTime}` : ""}
+</div>
+      </>
+    ) : (
+      <div style={{ fontSize: 14, color: secondaryText }}>
+        Weather unavailable.
+      </div>
+    )}
+  </div>
+
+  <div
+    style={{
+      background: cardBg,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 20,
+      padding: 14,
+      boxShadow: "0 6px 14px rgba(0,0,0,0.04)",
+    }}
+  >
+    <div
+      style={{
+        fontSize: 18,
+        fontWeight: 700,
+        color: primaryText,
+        marginBottom: 12,
+      }}
+    >
+      Upcoming
+    </div>
+
+    {homeDataStatus ? (
+      <div style={{ fontSize: 14, color: burgundy }}>
+        {homeDataStatus}
+      </div>
+    ) : upcomingTasks.length === 0 ? (
+      <div style={{ fontSize: 14, color: secondaryText }}>
+        No upcoming tasks right now.
+      </div>
+    ) : (
+      <div style={{ display: "grid", gap: 10 }}>
+        {upcomingTasks.map((task) => (
+          <div
+            key={`${task.type}-${task.id}`}
+            onClick={() =>
+              navigate(task.type === "event" ? "/events" : "/care")
+            }
+            style={{
+              border: `1px solid ${borderColor}`,
+              borderRadius: 14,
+              padding: "10px 12px",
+              background: "#FBF8F2",
+              cursor: "pointer",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: primaryText,
+                lineHeight: 1.25,
+              }}
+            >
+              {task.title}
+            </div>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 13,
+                color: secondaryText,
+                lineHeight: 1.35,
+              }}
+            >
+              {task.horseName} · {formatShortDate(task.date)}
+              {task.time ? ` ${formatTaskTime(task.time)}` : ""}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
+
+{urgentAlerts.length > 0 ? (
+  <div
+    style={{
+      marginTop: 14,
+      background: cardBg,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 22,
+      padding: 16,
+      boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+    }}
+  >
+    <div
+      style={{
+        fontSize: 18,
+        fontWeight: 700,
+        color: primaryText,
+        marginBottom: 12,
+      }}
+    >
+      Urgent Alerts
+    </div>
+
+    <div style={{ display: "grid", gap: 10 }}>
+      {urgentAlerts.map((alert) => (
+        <div
+          key={alert.id}
+          onClick={() => navigate(alert.route)}
+          style={{
+            border: `1px solid ${borderColor}`,
+            borderRadius: 16,
+            padding: "12px 14px",
+            background: "#F2E8E7",
+            cursor: "pointer",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: burgundy,
+              lineHeight: 1.25,
+            }}
+          >
+            {alert.title}
+          </div>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 13,
+              color: primaryText,
+              lineHeight: 1.35,
+            }}
+          >
+            {alert.detail}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+) : null}
+
+<div
+  style={{
+    marginTop: 14,
+    background: cardBg,
+    border: `1px solid ${borderColor}`,
+    borderRadius: 22,
+    padding: 16,
+    boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+  }}
+>
+  <div
+    style={{
+      fontSize: 18,
+      fontWeight: 700,
+      color: primaryText,
+      marginBottom: 12,
+    }}
+  >
+    Quick Actions
+  </div>
+
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+    }}
+  >
+    <button
+      onClick={() => navigate("/costs")}
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 16,
+        padding: "14px 12px",
+        background: "#FBF8F2",
+        color: primaryText,
+        fontWeight: 600,
+        fontSize: 15,
+        cursor: "pointer",
+      }}
+    >
+      Add Cost
+    </button>
+
+    <button
+      onClick={() => navigate("/care")}
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 16,
+        padding: "14px 12px",
+        background: "#FBF8F2",
+        color: primaryText,
+        fontWeight: 600,
+        fontSize: 15,
+        cursor: "pointer",
+      }}
+    >
+      Add Care
+    </button>
+
+    <button
+      onClick={() => navigate("/horses?openFeedInventory=true")}
+      style={{
+        gridColumn: "span 2",
+        border: `1px solid ${borderColor}`,
+        borderRadius: 16,
+        padding: "14px 12px",
+        background: "#FBF8F2",
+        color: primaryText,
+        fontWeight: 600,
+        fontSize: 15,
+        cursor: "pointer",
+      }}
+    >
+      Update Feed Inventory
+    </button>
+  </div>
+</div>
 
       {urgentCards.length > 0 ? (
         <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
@@ -742,6 +1457,167 @@ export default function HomePage({ user, horses = [], onAsk }) {
         </div>
       ) : null}
 
+      {isWeatherModalOpen ? (
+  <div
+    onClick={closeWeatherModal}
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.45)",
+      zIndex: 2000,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "100%",
+        maxWidth: 520,
+        maxHeight: "85vh",
+        overflowY: "auto",
+        background: "#FFFFFF",
+        borderRadius: 22,
+        padding: 18,
+        boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: primaryText,
+            }}
+          >
+            Hourly Weather
+          </div>
+
+          <div
+            style={{
+              fontSize: 14,
+              color: secondaryText,
+              marginTop: 4,
+            }}
+          >
+            Next 24 hours
+          </div>
+        </div>
+
+        <button
+          onClick={closeWeatherModal}
+          style={{
+            border: "none",
+            background: "transparent",
+            fontSize: 28,
+            cursor: "pointer",
+            color: secondaryText,
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {todayHourlyWeather.map((hour) => {
+          const rainChance = Math.round((hour.pop || 0) * 100);
+
+          return (
+            <div
+              key={hour.dt}
+              style={{
+                border: `1px solid ${borderColor}`,
+                borderRadius: 16,
+                padding: "12px 14px",
+                background: "#FBF8F2",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 700,
+                      color: primaryText,
+                    }}
+                  >
+                    {formatWeatherTime(hour.dt)}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: 13,
+                      color: secondaryText,
+                    }}
+                  >
+                    {getWeatherEmoji(hour.weather?.[0]?.main)} {hour.weather?.[0]?.main || "Weather"}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    textAlign: "right",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 700,
+                      color: navy,
+                    }}
+                  >
+                    {Math.round(hour.temp)}°
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: 13,
+                      color: secondaryText,
+                    }}
+                  >
+                    Rain {rainChance}%
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 13,
+                      color: secondaryText,
+                    }}
+                  >
+                    Wind {Math.round(hour.wind_speed || 0)} mph
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </div>
+) : null}
+
+      <FloatingAskLex onClick={openAskLex} />
       {isAskLexOpen ? (
         <div className="modal-backdrop" onClick={closeAskLex}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>

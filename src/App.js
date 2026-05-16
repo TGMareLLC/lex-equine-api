@@ -19,6 +19,8 @@ import {
 } from "firebase/firestore";
 import { App as CapApp } from "@capacitor/app";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { PushNotifications } from "@capacitor/push-notifications";
+import { FirebaseMessaging } from "@capacitor-firebase/messaging";
 import { Capacitor } from "@capacitor/core";
 import { Purchases, LOG_LEVEL } from "@revenuecat/purchases-capacitor";
 import {
@@ -87,6 +89,69 @@ try {
   await setDoc(userRef, newUserAccess);
 
   return newUserAccess;
+}
+
+async function registerForPushNotifications(user) {
+  if (!user?.uid) return;
+
+  if (Capacitor.getPlatform() === "web") {
+    alert("Push skipped: running on web.");
+    return;
+  }
+
+  try {
+    alert("Starting push setup...");
+
+    let permissionStatus = await PushNotifications.checkPermissions();
+
+    alert("Current push permission: " + permissionStatus.receive);
+
+    if (permissionStatus.receive !== "granted") {
+      permissionStatus = await PushNotifications.requestPermissions();
+      alert("Requested push permission: " + permissionStatus.receive);
+    }
+
+    if (permissionStatus.receive !== "granted") {
+      alert("Push permission not granted.");
+      return;
+    }
+
+await PushNotifications.addListener("registration", async (token) => {
+  alert("APNs token received.");
+
+  console.log("APNS TOKEN:", token.value);
+
+  const fcmTokenResult = await FirebaseMessaging.getToken();
+
+  alert("FCM token received.");
+
+  console.log("FCM TOKEN:", fcmTokenResult.token);
+
+  await setDoc(
+    doc(db, "users", user.uid),
+    {
+      pushToken: fcmTokenResult.token,
+      apnsToken: token.value,
+      pushPlatform: Capacitor.getPlatform(),
+      pushTokenUpdatedAt: Date.now(),
+      notificationsEnabled: true,
+    },
+    { merge: true }
+  );
+});
+
+    await PushNotifications.addListener("registrationError", (error) => {
+      alert("Push registration error. Check console.");
+      console.log("PUSH REGISTRATION ERROR:", error);
+    });
+
+    await PushNotifications.register();
+
+    alert("Push register called.");
+  } catch (e) {
+    alert("Register push failed. Check console.");
+    console.log("REGISTER PUSH ERROR:", e);
+  }
 }
 
 function ProtectedRoute({ user, children }) {
@@ -856,6 +921,8 @@ return;
 try {
   const accessData = await ensureUserAccessDoc(u);
   setUserAccess(accessData);
+
+  await registerForPushNotifications(u);
 
   // NEW: show onboarding if brand new user
   if (!accessData?.hasSeenIntro) {

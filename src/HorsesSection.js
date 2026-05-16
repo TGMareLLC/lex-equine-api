@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { Share } from "@capacitor/share";
 import { EmailComposer } from "capacitor-email-composer";
@@ -7,6 +7,8 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { registerPlugin } from "@capacitor/core";
 import imageCompression from "browser-image-compression";
 import { db, storage } from "./firebase";
+
+
 import {
   ref,
   uploadBytes,
@@ -16,6 +18,7 @@ import {
 import {
   collection,
   getDocs,
+  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -27,6 +30,11 @@ import {
 } from "firebase/firestore";
 import BottomNav from "./components/BottomNav";
 import FloatingAskLex from "./components/FloatingAskLex";
+
+const API_BASE_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://localhost:3000"
+    : "https://lex-equine-api.onrender.com";
 
 const TextMessageComposer = registerPlugin("TextMessageComposerPlugin");
 
@@ -156,7 +164,46 @@ const normalizeContact = (contact = {}) => ({
 const isOffline = () =>
   typeof navigator !== "undefined" && navigator.onLine === false;
 
+const getFeedInventoryStatus = (item) => {
+  const quantity = Number(item.currentQuantity || 0);
+  const dailyUse = Number(item.dailyUse || 0);
+  const lowThresholdDays = Number(item.lowThresholdDays || 3);
+
+  if (!dailyUse || dailyUse <= 0) {
+    return {
+      daysRemaining: null,
+      isLow: false,
+      warningText: "",
+    };
+  }
+
+  const daysRemaining = Math.floor(quantity / dailyUse);
+
+  if (quantity <= 0) {
+    return {
+      daysRemaining: 0,
+      isLow: true,
+      warningText: `${item.itemName || "This item"} is empty.`,
+    };
+  }
+
+  if (daysRemaining <= lowThresholdDays) {
+    return {
+      daysRemaining,
+      isLow: true,
+      warningText: `${item.itemName || "This item"} may run out in about ${daysRemaining} day(s).`,
+    };
+  }
+
+  return {
+    daysRemaining,
+    isLow: false,
+    warningText: "",
+  };
+};
+
 export default function HorsesSection(props) {
+
   const {
     user,
     horses,
@@ -169,6 +216,7 @@ export default function HorsesSection(props) {
   } = props;
 
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [horseName, setHorseName] = useState("");
   const [horseAge, setHorseAge] = useState("");
@@ -177,6 +225,13 @@ export default function HorsesSection(props) {
   const [horseMeds, setHorseMeds] = useState("");
   const [horseMedical, setHorseMedical] = useState("");
   const [horseNotes, setHorseNotes] = useState("");
+  const [blanketingEnabled, setBlanketingEnabled] = useState(false);
+const [rainSheetEnabled, setRainSheetEnabled] = useState(false);
+const [midweightEnabled, setMidweightEnabled] = useState(false);
+const [midweightTemp, setMidweightTemp] = useState("");
+const [heavyweightEnabled, setHeavyweightEnabled] = useState(false);
+const [heavyweightTemp, setHeavyweightTemp] = useState("");
+const [blanketNotes, setBlanketNotes] = useState("");
   const [horsePhotoUrl, setHorsePhotoUrl] = useState("");
   const [horsePhotoBlob, setHorsePhotoBlob] = useState(null);
   const [referencePhotos, setReferencePhotos] = useState([]);
@@ -239,6 +294,22 @@ const [shareHorseTarget, setShareHorseTarget] = useState(null);
   const [careHorse, setCareHorse] = useState(null);
 
   const [isAddCareOpen, setIsAddCareOpen] = useState(false);
+  const [isFeedInventoryOpen, setIsFeedInventoryOpen] = useState(false);
+const [feedInventoryHorse, setFeedInventoryHorse] = useState(null);
+const [feedItemType, setFeedItemType] = useState("Hay");
+const [feedItemName, setFeedItemName] = useState("");
+const [feedQuantity, setFeedQuantity] = useState("");
+const [feedUnit, setFeedUnit] = useState("bags");
+const [feedDailyUseUnit, setFeedDailyUseUnit] = useState("bags");
+const [feedFlakesPerBale, setFeedFlakesPerBale] = useState("");
+const [feedDailyUse, setFeedDailyUse] = useState("");
+const [feedUsageFrequency, setFeedUsageFrequency] = useState("daily");
+const [feedLowThreshold, setFeedLowThreshold] = useState("");
+const [feedNotes, setFeedNotes] = useState("");
+const [feedInventoryItems, setFeedInventoryItems] = useState([]);
+const [feedInventoryStatus, setFeedInventoryStatus] = useState("");
+const [editingFeedItemId, setEditingFeedItemId] = useState(null);
+const [isFeedFormOpen, setIsFeedFormOpen] = useState(false);
 
   const [careType, setCareType] = useState("Farrier");
   const [careTitle, setCareTitle] = useState("");
@@ -321,6 +392,13 @@ const [shareHorseTarget, setShareHorseTarget] = useState(null);
     setHorseMeds("");
     setHorseMedical("");
     setHorseNotes("");
+    setBlanketingEnabled(false);
+setRainSheetEnabled(false);
+setMidweightEnabled(false);
+setMidweightTemp("");
+setHeavyweightEnabled(false);
+setHeavyweightTemp("");
+setBlanketNotes("");
     setHorsePhotoUrl("");
 setHorsePhotoBlob(null);
 setReferencePhotos([]);
@@ -374,6 +452,30 @@ setReferencePhotos([]);
     setIsAddCareOpen(false);
     clearCareForm();
   };
+
+  const openFeedInventory = async (horse) => {
+  setFeedInventoryHorse(horse);
+  setIsFeedInventoryOpen(true);
+  setIsFeedFormOpen(false);
+
+  await loadFeedInventory(horse?.id);
+};
+
+const closeFeedInventory = () => {
+  setFeedInventoryHorse(null);
+  setIsFeedInventoryOpen(false);
+  setEditingFeedItemId(null);
+setFeedItemType("Hay");
+setFeedItemName("");
+setFeedQuantity("");
+setFeedUnit("bales");
+setFeedDailyUse("");
+setFeedDailyUseUnit("bales");
+setFeedUsageFrequency("daily");
+setFeedFlakesPerBale("");
+setFeedLowThreshold("");
+setFeedNotes("");
+};
 
   const closeEditLogModal = () => {
     setIsEditLogOpen(false);
@@ -681,6 +783,19 @@ const handleRemoveReferencePhoto = async (photoToRemove) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
+  useEffect(() => {
+  const params = new URLSearchParams(location.search);
+  const shouldOpenFeedInventory = params.get("openFeedInventory") === "true";
+
+  if (!shouldOpenFeedInventory) return;
+  if (!horses || horses.length === 0) return;
+
+  openFeedInventory(horses[0]);
+
+  navigate("/horses", { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [location.search, horses]);
+
   const openAdd = () => {
     setMode("add");
     clearForm();
@@ -701,6 +816,13 @@ const handleRemoveReferencePhoto = async (photoToRemove) => {
     setHorseMeds(horse.meds || "");
     setHorseMedical(horse.medicalIssues || "");
     setHorseNotes(horse.notes || "");
+    setBlanketingEnabled(horse.blanketingEnabled || false);
+setRainSheetEnabled(horse.rainSheetEnabled || false);
+setMidweightEnabled(horse.midweightEnabled || false);
+setMidweightTemp(horse.midweightTemp || "");
+setHeavyweightEnabled(horse.heavyweightEnabled || false);
+setHeavyweightTemp(horse.heavyweightTemp || "");
+setBlanketNotes(horse.blanketNotes || "");
     setHorsePhotoUrl(horse.photoUrl || "");
 setHorsePhotoBlob(null);
 setReferencePhotos(Array.isArray(horse.referencePhotos) ? horse.referencePhotos : []);
@@ -997,6 +1119,239 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
     }
   };
 
+  const loadFeedInventory = async (horseId) => {
+  if (!horseId) return;
+
+  try {
+    setFeedInventoryStatus("Loading feed inventory...");
+
+    const qFeed = query(
+  collection(db, "feed_inventory"),
+  where("horseId", "==", horseId)
+);
+
+
+const snap = await getDocs(qFeed);
+
+    const items = snap.docs
+  .map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }))
+  .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    setFeedInventoryItems(items);
+
+    if (items.length === 0) {
+      setFeedInventoryStatus("No feed inventory yet.");
+    } else {
+      setFeedInventoryStatus("");
+    }
+  } catch (e) {
+    console.log("LOAD FEED INVENTORY ERROR:", e);
+    setFeedInventoryStatus("Could not load feed inventory.");
+  }
+};
+
+const editFeedInventoryItem = (item) => {
+  if (!item) return;
+  setIsFeedFormOpen(true);
+
+  setEditingFeedItemId(item.id);
+  setFeedItemType(item.itemType || "Hay");
+  setFeedItemName(item.itemName || "");
+
+  setFeedQuantity(
+    item.currentQuantity != null ? String(item.currentQuantity) : ""
+  );
+
+  setFeedUnit(item.unit || "bales");
+
+  setFeedDailyUse(
+    item.dailyUse != null ? String(item.dailyUse) : ""
+  );
+
+  setFeedDailyUseUnit(item.dailyUseUnit || item.unit || "bales");
+  setFeedUsageFrequency(item.usageFrequency || "daily");
+
+  setFeedFlakesPerBale(
+    item.flakesPerBale != null ? String(item.flakesPerBale) : ""
+  );
+
+  setFeedLowThreshold(
+    item.lowThresholdDays != null ? String(item.lowThresholdDays) : ""
+  );
+
+  setFeedNotes(item.notes || "");
+
+  setTimeout(() => {
+    const input = document.querySelector('[placeholder="Feed Item Name"]');
+    if (input) {
+      input.scrollIntoView({ behavior: "smooth", block: "center" });
+      input.focus();
+    }
+  }, 100);
+};
+
+  
+const deleteFeedInventoryItem = async (itemId) => {
+  if (!itemId) return;
+
+  const confirmed = window.confirm("Delete this feed item?");
+  if (!confirmed) return;
+
+  try {
+    await deleteDoc(doc(db, "feed_inventory", itemId));
+
+    if (feedInventoryHorse?.id) {
+      await loadFeedInventory(feedInventoryHorse.id);
+      setIsFeedFormOpen(false);
+setEditingFeedItemId(null);
+    }
+  } catch (e) {
+    console.log("DELETE FEED INVENTORY ERROR:", e);
+    alert("Failed to delete feed item.");
+  }
+};
+
+  const saveFeedInventoryItem = async () => {
+  if (!user?.uid) {
+    alert("Please log in first.");
+    return;
+  }
+
+  if (!feedInventoryHorse?.id) {
+    alert("No horse selected.");
+    return;
+  }
+
+  if (!feedItemName.trim()) {
+    alert("Please enter a feed item name.");
+    return;
+  }
+
+  const quantityNumber = Number(feedQuantity);
+  const dailyUseNumber = Number(feedDailyUse);
+  const lowThresholdNumber = Number(feedLowThreshold);
+
+  if (Number.isNaN(quantityNumber) || quantityNumber < 0) {
+    alert("Please enter a valid current quantity.");
+    return;
+  }
+
+  if (Number.isNaN(dailyUseNumber) || dailyUseNumber <= 0) {
+    alert("Please enter a valid daily use amount.");
+    return;
+  }
+
+  const estimatedDaysRemaining =
+  dailyUseNumber > 0
+    ? Math.floor(quantityNumber / dailyUseNumber)
+    : null;
+
+const estimatedDepletionDate =
+  estimatedDaysRemaining != null
+    ? Date.now() + estimatedDaysRemaining * 86400000
+    : null;
+
+  try {
+    if (editingFeedItemId) {
+  await updateDoc(doc(db, "feed_inventory", editingFeedItemId), {
+    itemType: feedItemType,
+    itemName: feedItemName.trim(),
+    currentQuantity: quantityNumber,
+    unit: feedUnit,
+    dailyUse: dailyUseNumber,
+    dailyUseUnit: feedDailyUseUnit,
+    usageFrequency: feedUsageFrequency,
+    flakesPerBale: feedFlakesPerBale || null,
+    lowThresholdDays: Number.isNaN(lowThresholdNumber)
+      ? null
+      : lowThresholdNumber,
+      estimatedDaysRemaining,
+estimatedDepletionDate,
+    notes: feedNotes.trim(),
+    updatedAt: Date.now(),
+  });
+} else {
+  await addDoc(collection(db, "feed_inventory"), {
+      ownerUid: user.uid,
+      horseId: feedInventoryHorse.id,
+      horseName: feedInventoryHorse.name || "Unnamed",
+      itemType: feedItemType,
+      itemName: feedItemName.trim(),
+      currentQuantity: quantityNumber,
+      unit: feedUnit,
+      dailyUse: dailyUseNumber,
+dailyUseUnit: feedDailyUseUnit,
+usageFrequency: feedUsageFrequency,
+flakesPerBale: feedFlakesPerBale || null,
+lowThresholdDays: Number.isNaN(lowThresholdNumber)
+  ? 3
+  : lowThresholdNumber,
+estimatedDaysRemaining,
+estimatedDepletionDate,
+      notes: feedNotes.trim(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  const isLowInventory =
+  estimatedDaysRemaining != null &&
+  estimatedDaysRemaining <=
+    (Number.isNaN(lowThresholdNumber)
+      ? 3
+      : lowThresholdNumber);
+
+if (isLowInventory) {
+  try {
+    const userSnap = await getDoc(doc(db, "users", user.uid));
+const userData = userSnap.exists() ? userSnap.data() : null;
+
+    if (userData?.pushToken) {
+      await fetch(`${API_BASE_URL}/send-push`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: userData.pushToken,
+          title: "Low Feed Alert",
+          body: `${feedItemName} may run out in about ${estimatedDaysRemaining} day(s).`,
+          data: {
+            type: "low_feed",
+            horseId: feedInventoryHorse.id,
+          },
+        }),
+      });
+    }
+  } catch (pushErr) {
+    console.log("LOW FEED PUSH ERROR:", pushErr);
+  }
+}
+
+    alert("Feed item saved.");
+    await loadFeedInventory(feedInventoryHorse.id);
+
+    setFeedItemType("Hay");
+    setFeedItemName("");
+    setFeedQuantity("");
+    setFeedUnit("bags");
+setFeedDailyUse("");
+setFeedDailyUseUnit("bags");
+setFeedUsageFrequency("daily");
+setFeedFlakesPerBale("");
+setFeedLowThreshold("");
+setFeedNotes("");
+setEditingFeedItemId(null);
+setIsFeedFormOpen(false);
+  } catch (e) {
+    console.log("SAVE FEED INVENTORY ERROR:", e);
+    alert("Failed to save feed item.");
+  }
+};
+
   const saveCareItem = async () => {
     if (!user?.uid) {
       alert("Please log in first.");
@@ -1188,6 +1543,13 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
       meds: cleanText(horseMeds),
       medicalIssues: cleanText(horseMedical),
       notes: cleanText(horseNotes),
+      blanketingEnabled,
+rainSheetEnabled,
+midweightEnabled,
+midweightTemp: cleanText(midweightTemp),
+heavyweightEnabled,
+heavyweightTemp: cleanText(heavyweightTemp),
+blanketNotes: cleanText(blanketNotes),
       photoUrl: cleanText(finalPhotoUrl),
       photoPath: cleanText(finalPhotoPath),
       referencePhotos,
@@ -2203,6 +2565,79 @@ const textHorseCareInstructions = async (horse) => {
     {viewHorse.feed || "—"}
   </div>
 </div>
+<div style={{ marginTop: 14 }}>
+  <button
+    onClick={() => openFeedInventory(viewHorse)}
+    style={{
+      width: "100%",
+      border: `1px solid ${borderColor}`,
+      borderRadius: 14,
+      padding: "14px 16px",
+      background: softBg,
+      color: primaryText,
+      fontWeight: 600,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Feed Inventory
+  </button>
+</div>
+
+{viewHorse.blanketingEnabled ? (
+  <div
+    style={{
+      marginTop: 14,
+      padding: 14,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 14,
+      background: softBg,
+    }}
+  >
+    <div
+      style={{
+        fontSize: 13,
+        color: secondaryText,
+        marginBottom: 8,
+      }}
+    >
+      Blanketing
+    </div>
+
+    <div style={{ display: "grid", gap: 6 }}>
+      {viewHorse.rainSheetEnabled ? (
+        <div style={{ fontSize: 16, color: primaryText }}>
+          Rain sheet: Yes
+        </div>
+      ) : null}
+
+      {viewHorse.midweightEnabled ? (
+        <div style={{ fontSize: 16, color: primaryText }}>
+          Midweight: {viewHorse.midweightTemp || "—"}°
+        </div>
+      ) : null}
+
+      {viewHorse.heavyweightEnabled ? (
+        <div style={{ fontSize: 16, color: primaryText }}>
+          Heavyweight: {viewHorse.heavyweightTemp || "—"}°
+        </div>
+      ) : null}
+
+      {viewHorse.blanketNotes ? (
+        <div
+          style={{
+            fontSize: 15,
+            color: secondaryText,
+            whiteSpace: "pre-wrap",
+            marginTop: 4,
+          }}
+        >
+          {viewHorse.blanketNotes}
+        </div>
+      ) : null}
+    </div>
+  </div>
+) : null}
               <div>
                 <div style={{ fontSize: 13, color: secondaryText }}>Meds</div>
                 <div
@@ -2822,6 +3257,118 @@ viewHorse.referencePhotos.length > 0 ? (
               rows={2}
               style={{ marginTop: 10 }}
             />
+
+            <div
+  style={{
+    marginTop: 14,
+    padding: 14,
+    border: `1px solid ${borderColor}`,
+    borderRadius: 16,
+    background: "#FBF8F2",
+  }}
+>
+  <label
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontSize: 15,
+      fontWeight: 600,
+      color: primaryText,
+    }}
+  >
+    <input
+      type="checkbox"
+      checked={blanketingEnabled}
+      onChange={(e) => setBlanketingEnabled(e.target.checked)}
+    />
+    Use blanketing preferences
+  </label>
+
+  {blanketingEnabled ? (
+    <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+      <label
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    fontSize: 15,
+    fontWeight: 600,
+    color: primaryText,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={rainSheetEnabled}
+    onChange={(e) => setRainSheetEnabled(e.target.checked)}
+  />
+  Rain sheet
+</label>
+
+      <label
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    fontSize: 15,
+    fontWeight: 600,
+    color: primaryText,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={midweightEnabled}
+    onChange={(e) => setMidweightEnabled(e.target.checked)}
+  />
+  Midweight blanket
+</label>
+
+{midweightEnabled ? (
+  <input
+    className="field-input"
+    placeholder="Midweight temperature, ex: 30"
+    value={midweightTemp}
+    onChange={(e) => setMidweightTemp(e.target.value)}
+  />
+) : null}
+
+      <label
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    fontSize: 15,
+    fontWeight: 600,
+    color: primaryText,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={heavyweightEnabled}
+    onChange={(e) => setHeavyweightEnabled(e.target.checked)}
+  />
+  Heavyweight blanket
+</label>
+
+{heavyweightEnabled ? (
+  <input
+    className="field-input"
+    placeholder="Heavyweight temperature, ex: 20"
+    value={heavyweightTemp}
+    onChange={(e) => setHeavyweightTemp(e.target.value)}
+  />
+) : null}
+
+      <textarea
+        className="field-textarea"
+        placeholder="Blanketing notes"
+        value={blanketNotes}
+        onChange={(e) => setBlanketNotes(e.target.value)}
+        rows={2}
+      />
+    </div>
+  ) : null}
+</div>
 
             <textarea
               className="field-textarea"
@@ -3921,6 +4468,383 @@ viewHorse.referencePhotos.length > 0 ? (
           </div>
         </div>
       ) : null}
+
+{isFeedInventoryOpen && feedInventoryHorse ? (
+  <div className="modal-backdrop" onClick={closeFeedInventory}>
+    <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-handle" />
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <h3 style={{ margin: 0, fontSize: 28, fontWeight: 600, color: navy }}>
+          Feed Inventory
+        </h3>
+
+        <button
+          onClick={closeFeedInventory}
+          style={{
+            background: "transparent",
+            border: "none",
+            fontSize: 24,
+            cursor: "pointer",
+            color: secondaryText,
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div style={{ fontSize: 15, color: secondaryText, marginTop: 6 }}>
+        Tracking Feed Inventory for {feedInventoryHorse.name || "this horse"}.
+      </div>
+
+      {!isFeedFormOpen ? (
+        <>
+          <div style={{ marginTop: 18 }}>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                color: primaryText,
+                marginBottom: 10,
+              }}
+            >
+              Current Feed Inventory
+            </div>
+
+            {feedInventoryItems.length === 0 ? (
+              <div
+                style={{
+                  fontSize: 14,
+                  color: secondaryText,
+                  padding: 14,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 14,
+                  background: "#FCFBF8",
+                }}
+              >
+                {feedInventoryStatus || "No feed inventory yet."}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {feedInventoryItems.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: 14,
+                      border: `1px solid ${borderColor}`,
+                      borderRadius: 14,
+                      background: "#FCFBF8",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 16,
+                        fontWeight: 600,
+                        color: primaryText,
+                      }}
+                    >
+                      {item.itemName || "Unnamed Feed"}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 14,
+                        color: secondaryText,
+                        marginTop: 4,
+                      }}
+                    >
+                      On hand: {item.currentQuantity || 0} {item.unit || ""}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 14,
+                        color: secondaryText,
+                        marginTop: 4,
+                      }}
+                    >
+                      Uses {item.dailyUse || 0}{" "}
+                      {item.dailyUseUnit || item.unit || ""}{" "}
+                      {item.usageFrequency || "daily"}
+                    </div>
+
+                    {(() => {
+  const inventoryStatus = getFeedInventoryStatus(item);
+
+  return (
+    <>
+      <div
+        style={{
+          fontSize: 14,
+          color: primaryText,
+          marginTop: 6,
+          fontWeight: 500,
+        }}
+      >
+        Estimated{" "}
+        {inventoryStatus.daysRemaining != null
+          ? inventoryStatus.daysRemaining
+          : item.estimatedDaysRemaining || 0}{" "}
+        day(s) remaining
+      </div>
+
+      {inventoryStatus.isLow ? (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "10px 12px",
+            borderRadius: 12,
+            background: "#F2E8E7",
+            color: burgundy,
+            fontSize: 13,
+            fontWeight: 600,
+            lineHeight: 1.35,
+          }}
+        >
+          {inventoryStatus.warningText}
+        </div>
+      ) : null}
+    </>
+  );
+})()}
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <button
+                        className="small-button"
+                        onClick={() => editFeedInventoryItem(item)}
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        className="small-button"
+                        onClick={() => deleteFeedInventoryItem(item.id)}
+                        style={{ borderColor: burgundy, color: burgundy }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            className="primary-button"
+            onClick={() => {
+              setEditingFeedItemId(null);
+              setFeedItemType("Hay");
+              setFeedItemName("");
+              setFeedQuantity("");
+              setFeedUnit("bales");
+              setFeedDailyUse("");
+              setFeedDailyUseUnit("bales");
+              setFeedUsageFrequency("daily");
+              setFeedFlakesPerBale("");
+              setFeedLowThreshold("");
+              setFeedNotes("");
+              setIsFeedFormOpen(true);
+            }}
+            style={{ width: "100%", marginTop: 16 }}
+          >
+            + Add Feed Supply
+          </button>
+        </>
+      ) : (
+        <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+          {editingFeedItemId ? (
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                background: "#F5EEDB",
+                color: "#6E5A36",
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              Editing feed item — update the fields, then tap Save Changes.
+            </div>
+          ) : null}
+
+          <select
+            className="field-select"
+            value={feedItemType}
+            onChange={(e) => {
+  const nextType = e.target.value;
+  setFeedItemType(nextType);
+
+  if (nextType === "Hay") {
+    setFeedUnit("bales");
+    setFeedDailyUseUnit("bales");
+  } else if (nextType === "Grain") {
+    setFeedUnit("bags");
+    setFeedDailyUseUnit("pounds");
+  } else if (nextType === "Supplement") {
+    setFeedUnit("mL");
+    setFeedDailyUseUnit("mL");
+  }
+}}
+          >
+            <option value="Hay">Hay</option>
+            <option value="Grain">Grain</option>
+            <option value="Supplement">Supplement</option>
+          </select>
+
+          <input
+            className="field-input"
+            placeholder="Feed Item Name"
+            value={feedItemName}
+            onChange={(e) => setFeedItemName(e.target.value)}
+          />
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 140px",
+              gap: 10,
+            }}
+          >
+            <input
+              className="field-input"
+              type="number"
+              placeholder="Qty On Hand"
+              value={feedQuantity}
+              onChange={(e) => setFeedQuantity(e.target.value)}
+            />
+
+            <select
+              className="field-select"
+              value={feedUnit}
+              onChange={(e) => setFeedUnit(e.target.value)}
+            >
+              {feedItemType === "Hay" ? (
+                <>
+                  <option value="bales">bales</option>
+                  <option value="flakes">flakes</option>
+                </>
+              ) : feedItemType === "Grain" ? (
+                <>
+                  <option value="bags">bags</option>
+                  <option value="pounds">pounds</option>
+                  <option value="scoops">scoops</option>
+                  <option value="quarts">quarts</option>
+                </>
+              ) : (
+                <>
+                  <option value="mL">mL</option>
+                  <option value="ounces">ounces</option>
+                  <option value="scoops">scoops</option>
+                  <option value="grams">grams</option>
+                  <option value="pounds">pounds</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 140px",
+              gap: 10,
+            }}
+          >
+            <input
+              className="field-input"
+              type="number"
+              placeholder="Amount Used"
+              value={feedDailyUse}
+              onChange={(e) => setFeedDailyUse(e.target.value)}
+            />
+
+            <select
+              className="field-select"
+              value={feedDailyUseUnit}
+              onChange={(e) => setFeedDailyUseUnit(e.target.value)}
+            >
+              {feedItemType === "Hay" ? (
+                <>
+                  <option value="bales">bales</option>
+                  <option value="flakes">flakes</option>
+                </>
+              ) : feedItemType === "Grain" ? (
+                <>
+                  <option value="bags">bags</option>
+                  <option value="pounds">pounds</option>
+                  <option value="scoops">scoops</option>
+                  <option value="quarts">quarts</option>
+                </>
+              ) : (
+                <>
+                  <option value="mL">mL</option>
+                  <option value="ounces">ounces</option>
+                  <option value="scoops">scoops</option>
+                  <option value="grams">grams</option>
+                  <option value="pounds">pounds</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          <select
+            className="field-select"
+            value={feedUsageFrequency}
+            onChange={(e) => setFeedUsageFrequency(e.target.value)}
+          >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Bi-Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+
+          {feedItemType === "Hay" ? (
+            <input
+              className="field-input"
+              type="number"
+              placeholder="How many flakes are in one bale?"
+              value={feedFlakesPerBale}
+              onChange={(e) => setFeedFlakesPerBale(e.target.value)}
+            />
+          ) : null}
+
+          <input
+            className="field-input"
+            type="number"
+            placeholder="Remind me when I have this many days left"
+            value={feedLowThreshold}
+            onChange={(e) => setFeedLowThreshold(e.target.value)}
+          />
+
+          <textarea
+            className="field-textarea"
+            placeholder="Notes"
+            value={feedNotes}
+            onChange={(e) => setFeedNotes(e.target.value)}
+            rows={3}
+          />
+
+          <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+            <button className="secondary-button" onClick={() => setIsFeedFormOpen(false)}>
+              Cancel
+            </button>
+
+            <button className="primary-button" onClick={saveFeedInventoryItem}>
+              {editingFeedItemId ? "Save Changes" : "Save Feed Item"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+) : null}
 
       <FloatingAskLex onAsk={onAsk} />
       <BottomNav />

@@ -373,48 +373,61 @@ completed: false,
   };
 
   const markDone = async (item) => {
-    if (!item?.id) return;
+  if (!item?.id) return;
 
-    try {
-      await addDoc(collection(db, "care_history"), buildCareHistoryPayload(item));
+  try {
+    await addDoc(collection(db, "care_history"), buildCareHistoryPayload(item));
 
-      await updateDoc(doc(db, "reminders", item.id), {
-        completed: true,
-        completedAt: Date.now(),
+    if (item.costAmount) {
+      await addDoc(collection(db, "costs"), {
+        ownerUid: item.ownerUid,
+        horseId: item.horseId || null,
+        horseName: item.horseName || "Shared",
+        amount: item.costAmount,
+        category: item.type || "Care",
+        note: item.title || item.type || "Care Item",
+        date: item.dueDate || Date.now(),
+        createdAt: Date.now(),
       });
-
-      if (item.repeatInterval && item.repeatInterval !== "One Time") {
-        const nextDue = getNextDueDateMs(item.dueDate, item.repeatInterval);
-
-        if (nextDue) {
-          const offset = ALERT_OFFSETS[item.alertTiming] ?? 1;
-          const nextAlert = nextDue - offset * 86400000;
-
-          await addDoc(collection(db, "reminders"), {
-            ownerUid: item.ownerUid,
-            horseId: item.horseId || null,
-            horseName: item.horseName || "Shared",
-            type: item.type || "Custom",
-            title: item.title || item.type || "Care Item",
-            dueDate: nextDue,
-            alertDate: nextAlert,
-            time: item.time || "",
-            repeatInterval: item.repeatInterval,
-            alertTiming: item.alertTiming || "1 Day Before",
-            notes: item.notes || "",
-            completed: false,
-            createdAt: Date.now(),
-          });
-        }
-      }
-
-      await loadCare();
-    } catch (e) {
-      console.log("MARK DONE ERROR:", e);
-      alert("Failed to complete care item.");
     }
-  };
 
+    await updateDoc(doc(db, "reminders", item.id), {
+      completed: true,
+      completedAt: Date.now(),
+    });
+
+    if (item.repeatInterval && item.repeatInterval !== "One Time") {
+      const nextDue = getNextDueDateMs(item.dueDate, item.repeatInterval);
+
+      if (nextDue) {
+        const offset = ALERT_OFFSETS[item.alertTiming] ?? 1;
+        const nextAlert = nextDue - offset * 86400000;
+
+        await addDoc(collection(db, "reminders"), {
+          ownerUid: item.ownerUid,
+          horseId: item.horseId || null,
+          horseName: item.horseName || "Shared",
+          type: item.type || "Custom",
+          title: item.title || item.type || "Care Item",
+          dueDate: nextDue,
+          alertDate: nextAlert,
+          time: item.time || "",
+          repeatInterval: item.repeatInterval,
+          alertTiming: item.alertTiming || "1 Day Before",
+          notes: item.notes || "",
+          costAmount: item.costAmount || null,
+          completed: false,
+          createdAt: Date.now(),
+        });
+      }
+    }
+
+    await loadCare();
+  } catch (e) {
+    console.log("MARK DONE ERROR:", e);
+    alert("Failed to complete care item.");
+  }
+};
   const deleteItem = async (id) => {
     if (!id) return;
 

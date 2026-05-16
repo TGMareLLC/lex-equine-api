@@ -5,17 +5,21 @@ console.log("OpenAI key loaded:", !!process.env.OPENAI_API_KEY);
 console.log("Google key loaded:", !!process.env.GOOGLE_MAPS_API_KEY);
 
 const express = require("express");
-const OpenAI = require("openai");
 const admin = require("firebase-admin");
+const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
+  : require("./firebase-service-account.json");
+const firebaseApp = admin.apps.length
+  ? admin.app()
+  : admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: serviceAccount.project_id,
+    });
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
 
-admin.initializeApp({
-  credential: admin.credential.cert(
-    JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
-  ),
-});
 
 let FAQ_CACHE = [];
 const firestore = admin.firestore();
@@ -231,6 +235,7 @@ AI ASK ROUTE
 
 app.post("/ask", async (req, res) => {
   try {
+        const startTime = Date.now();
     const question = req.body?.question;
 
     if (!question) {
@@ -238,6 +243,7 @@ app.post("/ask", async (req, res) => {
     }
 
     const activeHorseId = req.body?.activeHorseId || null;
+        const contextStartTime = Date.now();
 
     let horseContext = "";
 
@@ -261,7 +267,7 @@ Notes: ${h.notes || ""}
         .collection("costs")
         .where("horseId", "==", activeHorseId)
         .orderBy("date", "desc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const recentCosts = costsSnap.docs
@@ -282,7 +288,7 @@ ${recentCosts || "No recent costs found."}
         .collection("reminders")
         .where("horseId", "==", activeHorseId)
         .orderBy("dueDate", "asc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const upcomingCare = remindersSnap.docs
@@ -303,7 +309,7 @@ ${upcomingCare || "No upcoming care found."}
         .collection("sickwatch")
         .where("horseId", "==", activeHorseId)
         .orderBy("createdAt", "desc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const recentHealthLogs = sickWatchSnap.docs
@@ -315,7 +321,7 @@ ${upcomingCare || "No upcoming care found."}
 - Appetite: ${s.appetite || "Not logged"}
 - Water: ${s.water || "Not logged"}
 - Temperature: ${s.temperature || "Not logged"}
-- Notes: ${s.notes || "None"}
+- Notes: ${(s.notes || "None").slice(0, 120)}
 `;
         })
         .join("\n");
@@ -330,14 +336,14 @@ ${recentHealthLogs || "No recent health logs found."}
         .collection("logs")
         .where("horseId", "==", activeHorseId)
         .orderBy("createdAt", "desc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const recentLogs = logsSnap.docs
         .map((doc) => {
           const l = doc.data();
 
-          return `- ${l.text || "No details"} (${l.type || "note"})`;
+          return `- ${(l.text || "No details").slice(0, 120)} (${l.type || "note"})`;
         })
         .join("\n");
 
@@ -351,7 +357,7 @@ ${recentLogs || "No recent notes found."}
         .collection("events")
         .where("horseId", "==", activeHorseId)
         .orderBy("eventDate", "asc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const upcomingEvents = eventsSnap.docs
@@ -372,7 +378,7 @@ ${upcomingEvents || "No upcoming events found."}
         .collection("documents")
         .where("horseId", "==", activeHorseId)
         .orderBy("createdAt", "desc")
-        .limit(5)
+        .limit(3)
         .get();
 
       const recentDocuments = documentsSnap.docs
@@ -390,6 +396,9 @@ ${recentDocuments || "No documents found."}
 `;
     }
 
+    console.log("Context timing:", {
+      contextMs: Date.now() - contextStartTime,
+    });
     const systemPrompt = `
 You are Lex, an equine care assistant.
 
@@ -407,8 +416,9 @@ Speak naturally to the horse owner.
 ${horseContext}
 `;
 
+    const openAIStartTime = Date.now();
     const response = await client.responses.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
       input: [
         {
           role: "system",
@@ -421,6 +431,11 @@ ${horseContext}
       ],
     });
 
+    console.log("AI timing:", {
+      totalMs: Date.now() - startTime,
+      openAIMs: Date.now() - openAIStartTime,
+    });
+
     return res.json({
       answer: response.output_text,
     });
@@ -429,6 +444,8 @@ ${horseContext}
     return res.status(500).json({ error: "AI request failed" });
   }
 });
+
+
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
@@ -443,6 +460,44 @@ app.post("/refresh-faq", async (req, res) => {
   FAQ_CACHE = snap.docs.map((d) => d.data());
 
   return res.json({ ok: true, count: FAQ_CACHE.length });
+});
+
+app.post("/send-push", async (req, res) => {
+  try {
+    const { token, title, body, data } = req.body;
+
+    if (!token || !title || !body) {
+      return res.status(400).json({
+        error: "Missing token, title, or body",
+      });
+    }
+
+    const message = {
+      token,
+      notification: {
+        title,
+        body,
+      },
+      data: data || {},
+    };
+
+    const response = await admin
+      .messaging(firebaseApp)
+      .send(message);
+
+    console.log("PUSH SENT:", response);
+
+    res.json({
+      success: true,
+      response,
+    });
+  } catch (e) {
+    console.log("SEND PUSH ERROR:", e);
+
+    res.status(500).json({
+      error: e.message,
+    });
+  }
 });
 
 app.listen(PORT, "0.0.0.0", async () => {

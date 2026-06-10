@@ -16,8 +16,17 @@ const firebaseApp = admin.apps.length
       projectId: serviceAccount.project_id,
     });
 const OpenAI = require("openai");
+const multer = require("multer");
 
 const app = express();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 8 * 1024 * 1024,
+  },
+});
+
 app.use(express.json());
 
 
@@ -73,6 +82,13 @@ const client = new OpenAI({
 });
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "";
+
+const fileToDataUrl = (file) => {
+  if (!file?.buffer || !file?.mimetype) return null;
+
+  const base64 = file.buffer.toString("base64");
+  return `data:${file.mimetype};base64,${base64}`;
+};
 
 /* --------------------------------
 RESOURCE SEARCH
@@ -233,10 +249,21 @@ app.post("/resources-search", async (req, res) => {
 AI ASK ROUTE
 -------------------------------- */
 
-app.post("/ask", async (req, res) => {
+app.post("/ask", upload.single("photo"), async (req, res) => {
   try {
-        const startTime = Date.now();
-    const question = req.body?.question;
+            const startTime = Date.now();
+
+            console.log("ASK BODY:", req.body);
+    console.log("ASK FILE:", req.file ? req.file.originalname : "no file");
+
+    const question =
+      req.body?.question ||
+      req.body?.rawQuestion ||
+      "";
+
+    const uploadedPhoto = req.file || null;
+
+    console.log("ASK QUESTION:", question);
 
     if (!question) {
       return res.status(400).json({ error: "Question required" });
@@ -416,6 +443,21 @@ Speak naturally to the horse owner.
 ${horseContext}
 `;
 
+        const photoDataUrl = fileToDataUrl(uploadedPhoto);
+
+    const userContent = photoDataUrl
+      ? [
+          {
+            type: "input_text",
+            text: question,
+          },
+          {
+            type: "input_image",
+            image_url: photoDataUrl,
+          },
+        ]
+      : question;
+
     const openAIStartTime = Date.now();
     const response = await client.responses.create({
       model: "gpt-4o-mini",
@@ -426,7 +468,7 @@ ${horseContext}
         },
         {
           role: "user",
-          content: question,
+          content: userContent,
         },
       ],
     });
@@ -493,6 +535,40 @@ app.post("/send-push", async (req, res) => {
     });
   } catch (e) {
     console.log("SEND PUSH ERROR:", e);
+
+    res.status(500).json({
+      error: e.message,
+    });
+  }
+});
+
+app.get("/test-push", async (req, res) => {
+  try {
+    const message = {
+      token: "fuhupo9oOEhUuo3N9xX4og:APA91bGaNW_xOTcoYcMrCCdKMQG7Pg7ns_etxxYr7awWlUdICdbNMTC8bjm0lEqvCHRBYTkRKssjhDnQEFcgCCQd32yc1brd_TWFtB3yZB-9-qI0hfuw8Ec",
+      notification: {
+        title: "Lex Equine",
+        body: "Push notifications are working.",
+      },
+      apns: {
+  payload: {
+    aps: {
+      "mutable-content": 1,
+    },
+  },
+},
+    };
+
+    const response = await admin.messaging(firebaseApp).send(message);
+
+    console.log(response);
+
+    res.json({
+      success: true,
+      response,
+    });
+  } catch (e) {
+    console.log(e);
 
     res.status(500).json({
       error: e.message,

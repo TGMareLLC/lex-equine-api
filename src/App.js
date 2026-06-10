@@ -95,35 +95,28 @@ async function registerForPushNotifications(user) {
   if (!user?.uid) return;
 
   if (Capacitor.getPlatform() === "web") {
-    alert("Push skipped: running on web.");
     return;
   }
 
   try {
-    alert("Starting push setup...");
 
     let permissionStatus = await PushNotifications.checkPermissions();
 
-    alert("Current push permission: " + permissionStatus.receive);
 
     if (permissionStatus.receive !== "granted") {
       permissionStatus = await PushNotifications.requestPermissions();
-      alert("Requested push permission: " + permissionStatus.receive);
     }
 
     if (permissionStatus.receive !== "granted") {
-      alert("Push permission not granted.");
       return;
     }
 
 await PushNotifications.addListener("registration", async (token) => {
-  alert("APNs token received.");
+
 
   console.log("APNS TOKEN:", token.value);
 
   const fcmTokenResult = await FirebaseMessaging.getToken();
-
-  alert("FCM token received.");
 
   console.log("FCM TOKEN:", fcmTokenResult.token);
 
@@ -141,15 +134,12 @@ await PushNotifications.addListener("registration", async (token) => {
 });
 
     await PushNotifications.addListener("registrationError", (error) => {
-      alert("Push registration error. Check console.");
       console.log("PUSH REGISTRATION ERROR:", error);
     });
 
     await PushNotifications.register();
 
-    alert("Push register called.");
   } catch (e) {
-    alert("Register push failed. Check console.");
     console.log("REGISTER PUSH ERROR:", e);
   }
 }
@@ -729,39 +719,47 @@ const accessState = hasPaidSubscription || hasAccessOverride
     ].join(" ");
   };
 
-  const onAsk = async (incomingQuestion) => {
+   const onAsk = async (incomingQuestion, incomingPhoto = null) => {
   const rawQuestion =
     typeof incomingQuestion === "string"
       ? incomingQuestion.trim()
       : question.trim();
 
-  if (!rawQuestion) {
+    if (!rawQuestion && !incomingPhoto) {
     if (typeof incomingQuestion !== "string") {
-      setAnswer("Please enter a question first.");
+      setAnswer("Please enter a question or choose a photo first.");
     }
-    return "Please enter a question first.";
+    return "Please enter a question or choose a photo first.";
   }
 
   if (typeof incomingQuestion !== "string") {
     setAnswer("Thinking...");
   }
 
-  const finalQuestion = `${buildRoleContext()}\n\n${rawQuestion}`;
+    const finalQuestion = `${buildRoleContext()}\n\n${
+    rawQuestion ||
+    "Please review this horse-related photo. Look for visible concerns such as wounds, swelling, hoof cracks, skin irritation, body condition changes, or progression compared with prior observations. Do not diagnose. Give practical observation notes, urgency level, and when to contact a vet."
+  }`;
 
   try {
     const idToken = user ? await user.getIdToken() : null;
 
+        const formData = new FormData();
+
+    formData.append("question", finalQuestion);
+    formData.append("rawQuestion", rawQuestion);
+    formData.append("userEmail", user?.email || "");
+    formData.append("userRole", role || "owner");
+    formData.append("idToken", idToken || "");
+    formData.append("activeHorseId", activeHorseId || "");
+
+    if (incomingPhoto) {
+      formData.append("photo", incomingPhoto);
+    }
+
     const res = await fetch(`${API_BASE_URL}/ask`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: finalQuestion,
-        rawQuestion,
-        userEmail: user?.email || null,
-        userRole: role || "owner",
-        idToken,
-        activeHorseId,
-      }),
+      body: formData,
     });
 
     const data = await res.json();

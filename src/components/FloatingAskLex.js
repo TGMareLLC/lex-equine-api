@@ -3,20 +3,24 @@ import lexHorseIcon from "../assets/lex-horse-icon.png";
 
 export default function FloatingAskLex({ onAsk }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [question, setQuestion] = useState("");
+    const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState("");
 
   const navy = "#24324A";
   const borderColor = "#E5E2DA";
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
 
-  const openModal = () => {
+    const openModal = () => {
     setIsOpen(true);
     setQuestion("");
     setAnswer("");
     setLoading(false);
+    setSelectedPhoto(null);
+    setPhotoPreview("");
   };
 
   const closeModal = () => {
@@ -24,11 +28,28 @@ export default function FloatingAskLex({ onAsk }) {
     setQuestion("");
     setAnswer("");
     setLoading(false);
+    setSelectedPhoto(null);
+    setPhotoPreview("");
+  };
+
+    const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+
+    setSelectedPhoto(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setAnswer("");
   };
 
   const handleAsk = async () => {
-    if (!question.trim()) {
-      alert("Type a question first.");
+        if (!question.trim() && !selectedPhoto) {
+      alert("Type a question or choose a photo first.");
       return;
     }
 
@@ -37,7 +58,7 @@ export default function FloatingAskLex({ onAsk }) {
 
     try {
       if (typeof onAsk === "function") {
-        const result = await onAsk(question.trim());
+               const result = await onAsk(question.trim(), selectedPhoto);
 
         if (typeof result === "string") {
           setAnswer(result);
@@ -151,6 +172,54 @@ export default function FloatingAskLex({ onAsk }) {
               rows={5}
               style={{ marginTop: 12 }}
             />
+
+                        <div style={{ marginTop: 12 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: primaryText,
+                  marginBottom: 6,
+                }}
+              >
+                Add a photo for Lex to review
+              </label>
+
+              <input
+                className="field-input"
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoSelect}
+              />
+
+              {photoPreview ? (
+                <div style={{ marginTop: 10 }}>
+                  <img
+                    src={photoPreview}
+                    alt="Selected for Lex review"
+                    style={{
+                      width: "100%",
+                      maxHeight: 260,
+                      objectFit: "cover",
+                      borderRadius: 16,
+                      border: `1px solid ${borderColor}`,
+                    }}
+                  />
+
+                  <button
+                    className="small-button"
+                    style={{ marginTop: 10 }}
+                    onClick={() => {
+                      setSelectedPhoto(null);
+                      setPhotoPreview("");
+                    }}
+                  >
+                    Remove Photo
+                  </button>
+                </div>
+              ) : null}
+            </div>
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
               <button className="secondary-button" onClick={closeModal}>

@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
+import { useLocation, useNavigate } from "react-router-dom";
 
 const isOffline = () =>
   typeof navigator !== "undefined" && navigator.onLine === false;
@@ -65,9 +66,12 @@ const csvEscape = (value) => {
 };
 
 export default function CostsPage({ user, horses = [], onAsk }) {
+  const location = useLocation();
+const navigate = useNavigate();
   const [costs, setCosts] = useState([]);
 
   const [horseFilter, setHorseFilter] = useState("all");
+  const selectedHorseId = new URLSearchParams(location.search).get("horseId");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [timeView, setTimeView] = useState("month");
   const [yearFilter, setYearFilter] = useState(String(new Date().getFullYear()));
@@ -76,13 +80,17 @@ export default function CostsPage({ user, horses = [], onAsk }) {
   const [mode, setMode] = useState("add");
   const [editingCostId, setEditingCostId] = useState("");
 
-  const [costAmount, setCostAmount] = useState("");
+    const [costAmount, setCostAmount] = useState("");
   const [costCategory, setCostCategory] = useState("hay");
   const [costItem, setCostItem] = useState("");
   const [costHorseId, setCostHorseId] = useState("shared");
   const [costVendor, setCostVendor] = useState("");
   const [costDate, setCostDate] = useState(getTodayInputValue());
   const [costNotes, setCostNotes] = useState("");
+
+  const [receiptPhoto, setReceiptPhoto] = useState(null);
+  const [receiptPreview, setReceiptPreview] = useState("");
+  const [receiptScanning, setReceiptScanning] = useState(false);
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportRangeType, setExportRangeType] = useState("year");
@@ -125,7 +133,7 @@ export default function CostsPage({ user, horses = [], onAsk }) {
     ];
   }, [horses]);
 
-  const clearCostForm = () => {
+    const clearCostForm = () => {
     setCostAmount("");
     setCostCategory("hay");
     setCostItem("");
@@ -133,6 +141,9 @@ export default function CostsPage({ user, horses = [], onAsk }) {
     setCostVendor("");
     setCostDate(getTodayInputValue());
     setCostNotes("");
+    setReceiptPhoto(null);
+    setReceiptPreview("");
+    setReceiptScanning(false);
     setEditingCostId("");
     setMode("add");
   };
@@ -210,6 +221,113 @@ export default function CostsPage({ user, horses = [], onAsk }) {
     loadCosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  useEffect(() => {
+  if (selectedHorseId) {
+    setHorseFilter(selectedHorseId);
+  }
+}, [selectedHorseId]);
+
+  const handleReceiptPhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+
+    setReceiptPhoto(file);
+    setReceiptPreview(URL.createObjectURL(file));
+  };
+
+    const scanReceipt = async () => {
+    if (!receiptPhoto) {
+      alert("Choose a receipt photo first.");
+      return;
+    }
+
+    if (typeof onAsk !== "function") {
+      alert("Lex scanner is not connected.");
+      return;
+    }
+
+    setReceiptScanning(true);
+
+    try {
+      const prompt = `
+Receipt scanner task.
+
+Read this receipt image and return ONLY valid JSON. No markdown. No explanation.
+
+Use this exact shape:
+{
+  "store": "",
+  "date": "YYYY-MM-DD",
+  "amount": "",
+  "item": "",
+  "category": "other",
+  "notes": ""
+}
+
+Rules:
+- amount should be the final total paid, numbers only, no dollar sign.
+- date must be YYYY-MM-DD if visible. If not visible, use an empty string.
+- store should be the merchant/store/vendor name.
+- item should be the main equine-related item if clear, otherwise a short receipt summary.
+- category must be one of: hay, feed, vet, farrier, meds, tack, supplies, emergency, other.
+- notes should include anything useful that does not fit elsewhere.
+`;
+
+      const result = await onAsk(prompt, receiptPhoto);
+      const rawText = typeof result === "string" ? result : result?.answer || "";
+
+      const cleaned = rawText
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+
+      const parsed = JSON.parse(cleaned);
+
+      if (parsed.amount) {
+        setCostAmount(String(parsed.amount));
+      }
+
+      if (parsed.category && COST_CATEGORIES.includes(parsed.category)) {
+        setCostCategory(parsed.category);
+      } else {
+        setCostCategory("other");
+      }
+
+      if (parsed.item) {
+        setCostItem(String(parsed.item));
+      }
+
+      if (parsed.store) {
+        setCostVendor(String(parsed.store));
+      }
+
+      if (parsed.date) {
+        setCostDate(String(parsed.date));
+      }
+
+      const notesParts = [];
+
+      if (parsed.notes) {
+        notesParts.push(String(parsed.notes));
+      }
+
+      notesParts.push("Scanned from receipt photo.");
+
+      setCostNotes(notesParts.join("\n"));
+    } catch (e) {
+      console.log("SCAN RECEIPT ERROR:", e);
+      alert("Lex could not read this receipt clearly. You can still enter it manually.");
+    } finally {
+      setReceiptScanning(false);
+    }
+  };
 
   const saveCost = async () => {
     if (!user?.uid) {
@@ -628,9 +746,21 @@ export default function CostsPage({ user, horses = [], onAsk }) {
             fontWeight: 400,
           }}
         >
-          Spending and cost tracking
+          {selectedHorseId
+  ? `Showing costs for ${horseNameById[selectedHorseId] || "this horse"}`
+  : "Spending and cost tracking"}
         </div>
       </div>
+
+      {selectedHorseId ? (
+  <button
+    className="small-button"
+    onClick={() => navigate("/costs")}
+    style={{ marginTop: 12 }}
+  >
+    View All Costs
+  </button>
+) : null}
 
       <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div
@@ -945,6 +1075,90 @@ export default function CostsPage({ user, horses = [], onAsk }) {
                 ×
               </button>
             </div>
+
+                        {mode === "add" ? (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: 14,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 16,
+                  background: "#FCFBF8",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: primaryText,
+                  }}
+                >
+                  Receipt Scanner
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 13,
+                    color: secondaryText,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Upload a receipt photo and Lex will try to fill in the cost details.
+                </div>
+
+                <input
+                  className="field-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleReceiptPhotoSelect}
+                  style={{ marginTop: 10 }}
+                />
+
+                {receiptPreview ? (
+                  <div style={{ marginTop: 10 }}>
+                    <img
+                      src={receiptPreview}
+                      alt="Receipt preview"
+                      style={{
+                        width: "100%",
+                        maxHeight: 240,
+                        objectFit: "cover",
+                        borderRadius: 14,
+                        border: `1px solid ${borderColor}`,
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 10,
+                      }}
+                    >
+                      <button
+                        className="small-button"
+                        onClick={scanReceipt}
+                        disabled={receiptScanning}
+                      >
+                        {receiptScanning ? "Scanning..." : "Scan Receipt"}
+                      </button>
+
+                      <button
+                        className="small-button"
+                        onClick={() => {
+                          setReceiptPhoto(null);
+                          setReceiptPreview("");
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <input
               className="field-input"

@@ -3,9 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { Clock, Menu } from "lucide-react";
 import { db, auth } from "../firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import lexHorseIcon from "../assets/lex-horse-icon.png";
-import FloatingAskLex from "../components/FloatingAskLex";
+import BottomNav from "../components/BottomNav";
+
+const API_BASE_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://localhost:3000"
+    : "https://lex-equine-api.onrender.com";
 
 function AskLexIcon() {
   return (
@@ -179,6 +184,24 @@ const formatTaskTime = (time) => {
   return `${displayHour}:${minute} ${suffix}`;
 };
 
+const getWeatherLocationName = async (latitude, longitude) => {
+  try {
+    const response = await fetch(
+      `https://api.openweathermap.org/geo/1.0/reverse?lat=${latitude}&lon=${longitude}&limit=1&appid=${process.env.REACT_APP_OPENWEATHER_API_KEY}`
+    );
+
+    const data = await response.json();
+    const place = data?.[0];
+
+    if (!place) return "Current Location";
+
+    return `${place.name}${place.state ? `, ${place.state}` : ""}`;
+  } catch (e) {
+    console.log("WEATHER LOCATION NAME ERROR:", e);
+    return "Current Location";
+  }
+};
+
 const formatWeatherTime = (timestamp) => {
   if (!timestamp) return "";
 
@@ -254,11 +277,39 @@ const getWeatherTiming = (weatherData) => {
 const getNextRainHour = (weatherData) => {
   if (!weatherData?.hourly?.length) return null;
 
+  const now = Date.now();
+  const next24Hours = now + 24 * 60 * 60 * 1000;
+
   return weatherData.hourly.find((hour) => {
+    const hourTime = hour.dt * 1000;
+
+    if (hourTime < now || hourTime > next24Hours) {
+      return false;
+    }
+
     const pop = Number(hour.pop || 0);
     const rainAmount = Number(hour.rain?.["1h"] || 0);
 
-    return pop >= 0.3 || rainAmount > 0;
+    const conditionMain = String(
+      hour.weather?.[0]?.main || ""
+    ).toLowerCase();
+
+    const conditionDescription = String(
+      hour.weather?.[0]?.description || ""
+    ).toLowerCase();
+
+    const conditionSaysRain =
+      conditionMain === "rain" ||
+      conditionMain === "thunderstorm" ||
+      conditionDescription.includes("rain") ||
+      conditionDescription.includes("shower") ||
+      conditionDescription.includes("storm");
+
+    return (
+      conditionSaysRain &&
+      pop >= 0.7 &&
+      rainAmount >= 0.03
+    );
   });
 };
 
@@ -271,12 +322,27 @@ const getFirstHourAtOrBelowTemp = (weatherData, threshold) => {
 
   if (Number.isNaN(thresholdNumber)) return null;
 
+  const now = Date.now();
+  const next24Hours = now + 24 * 60 * 60 * 1000;
+
   return weatherData.hourly.find((hour) => {
+    const hourTime = hour.dt * 1000;
+
+    if (hourTime < now || hourTime > next24Hours) {
+      return false;
+    }
+
     return Number(hour.temp) <= thresholdNumber;
   });
 };
 
-export default function HomePage({ user, horses = [], onAsk }) {
+export default function HomePage({
+  user,
+  horses = [],
+  careHorses = [],
+  careHorsesStatus = "",
+  onAsk,
+}) {
   const navigate = useNavigate();
 
   const [activeReminders, setActiveReminders] = useState([]);
@@ -285,13 +351,16 @@ export default function HomePage({ user, horses = [], onAsk }) {
   const [weatherData, setWeatherData] = useState(null);
 const [weatherStatus, setWeatherStatus] = useState("");
 const [weatherLocation, setWeatherLocation] = useState(null);
+const [weatherUpdatedAt, setWeatherUpdatedAt] = useState(null);
 const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
   const [homeDataStatus, setHomeDataStatus] = useState("");
 
   const [isAskLexOpen, setIsAskLexOpen] = useState(false);
-  const [lexQuestion, setLexQuestion] = useState("");
+    const [lexQuestion, setLexQuestion] = useState("");
   const [lexAnswer, setLexAnswer] = useState("");
   const [lexLoading, setLexLoading] = useState(false);
+  const [lexPhoto, setLexPhoto] = useState(null);
+  const [lexPhotoPreview, setLexPhotoPreview] = useState("");
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -328,7 +397,7 @@ const highTime = weatherTiming.highTime;
 const lowTime = weatherTiming.lowTime;
 const rainTime = weatherTiming.rainTime;
 
-const todayHourlyWeather = getTodayHourlyWeather(weatherData).slice(0, 24);
+const todayHourlyWeather = (weatherData?.hourly || []).slice(0, 24);
 
   useEffect(() => {
     const loadHomeData = async () => {
@@ -427,13 +496,102 @@ throw new Error(`Weather request failed: ${response.status} ${errorText}`);
 
     const data = await response.json();
 
-    setWeatherData(data);
-    setWeatherStatus("");
+   setWeatherData(data);
+setWeatherUpdatedAt(new Date());
+setWeatherStatus("");
+
+await checkBlanketAlerts(data);
   } catch (e) {
     console.log("LOAD WEATHER ERROR:", e?.message || e);
 alert(e?.message || "Weather error");
     setWeatherData(null);
     setWeatherStatus("Could not load weather.");
+  }
+};
+
+const checkBlanketAlerts = async (data) => {
+  if (!user?.uid || !data || !horses?.length) return;
+
+  try {
+    const userSnap = await getDoc(doc(db, "users", user.uid));
+    const userData = userSnap.exists() ? userSnap.data() : null;
+
+    if (!userData?.pushToken) return;
+
+    const todayKey = new Date().toDateString();
+
+    for (const horse of horses) {
+      if (!horse.blanketingEnabled) continue;
+
+      let alertTitle = "";
+      let alertBody = "";
+
+      if (horse.heavyweightEnabled) {
+        const heavyHour = getFirstHourAtOrBelowTemp(
+          data,
+          horse.heavyweightTemp
+        );
+
+        if (
+          heavyHour &&
+          horse.lastHeavyBlanketPush !== todayKey
+        ) {
+          alertTitle = "Heavyweight Blanket Recommended";
+          alertBody = `${horse.name} may need a heavyweight blanket around ${formatWeatherTime(
+            heavyHour.dt
+          )}. Forecast temp: ${Math.round(heavyHour.temp)}°.`;
+        }
+      }
+
+      if (!alertTitle && horse.midweightEnabled) {
+        const midHour = getFirstHourAtOrBelowTemp(
+          data,
+          horse.midweightTemp
+        );
+
+        if (
+          midHour &&
+          horse.lastMidBlanketPush !== todayKey
+        ) {
+          alertTitle = "Midweight Blanket Recommended";
+          alertBody = `${horse.name} may need a midweight blanket around ${formatWeatherTime(
+            midHour.dt
+          )}. Forecast temp: ${Math.round(midHour.temp)}°.`;
+        }
+      }
+
+      if (!alertTitle) continue;
+
+      await fetch(`${API_BASE_URL}/send-push`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: userData.pushToken,
+          title: alertTitle,
+          body: alertBody,
+          data: {
+            type: "blanket_alert",
+            horseId: horse.id,
+          },
+        }),
+      });
+
+      const updateData = {};
+
+if (alertTitle.includes("Heavyweight")) {
+  updateData.lastHeavyBlanketPush = todayKey;
+}
+
+if (alertTitle.includes("Midweight")) {
+  updateData.lastMidBlanketPush = todayKey;
+}
+
+await updateDoc(doc(db, "horses", horse.id), updateData);
+    }
+  } catch (e) {
+    console.log("BLANKET PUSH ERROR:", e);
   }
 };
 
@@ -453,8 +611,14 @@ useEffect(() => {
         longitude: position.coords.longitude,
       };
 
-      setWeatherLocation(coords);
-      loadWeather(coords);
+      getWeatherLocationName(coords.latitude, coords.longitude).then((locationName) => {
+  setWeatherLocation({
+    ...coords,
+    name: locationName,
+  });
+});
+
+loadWeather(coords);
     },
     (error) => {
       console.log("LOCATION ERROR:", error);
@@ -588,13 +752,16 @@ const urgentAlerts = useMemo(() => {
 
     if (horse.heavyweightEnabled) {
       const heavyThreshold = Number(horse.heavyweightTemp);
+      const heavyHour = getFirstHourAtOrBelowTemp(weatherData, heavyThreshold);
 
-      if (!Number.isNaN(heavyThreshold) && todayLow <= heavyThreshold) {
+      if (!Number.isNaN(heavyThreshold) && heavyHour) {
         alerts.push({
           id: `heavy-${horse.id}`,
           type: "blanket-heavy",
           title: "Heavyweight Blanket Recommended",
-          detail: `${horseName} may need a heavyweight blanket around ${lowTime || "tonight"}. Forecast low: ${todayLow}°.`,
+          detail: `${horseName} may need a heavyweight blanket around ${formatWeatherTime(
+            heavyHour.dt
+          )}. Forecast temp: ${Math.round(heavyHour.temp)}°.`,
           route: "/horses",
         });
 
@@ -604,13 +771,16 @@ const urgentAlerts = useMemo(() => {
 
     if (horse.midweightEnabled) {
       const midThreshold = Number(horse.midweightTemp);
+      const midHour = getFirstHourAtOrBelowTemp(weatherData, midThreshold);
 
-      if (!Number.isNaN(midThreshold) && todayLow <= midThreshold) {
+      if (!Number.isNaN(midThreshold) && midHour) {
         alerts.push({
           id: `mid-${horse.id}`,
           type: "blanket-mid",
           title: "Midweight Blanket Recommended",
-          detail: `${horseName} may need a midweight blanket around ${lowTime || "tonight"}. Forecast low: ${todayLow}°.`,
+          detail: `${horseName} may need a midweight blanket around ${formatWeatherTime(
+            midHour.dt
+          )}. Forecast temp: ${Math.round(midHour.temp)}°.`,
           route: "/horses",
         });
       }
@@ -637,7 +807,9 @@ const urgentAlerts = useMemo(() => {
         id: `feed-${item.id}`,
         type: "feed",
         title: days <= 0 ? "Feed Supply Empty" : "Low Feed Supply",
-        detail: `${item.horseName || "Unnamed"} — ${item.itemName || "Feed item"}: about ${days} day(s) remaining.`,
+        detail: `${item.horseName || "Unnamed"} — ${
+          item.itemName || "Feed item"
+        }: about ${days} day(s) remaining.`,
         route: "/horses",
       });
     }
@@ -651,7 +823,9 @@ const urgentAlerts = useMemo(() => {
         id: `overdue-${item.id}`,
         type: "overdue",
         title: "Overdue Care",
-        detail: `${item.horseName || "Unnamed"} — ${item.title || item.type || "Care item"} was due ${Math.abs(days)} day(s) ago.`,
+        detail: `${item.horseName || "Unnamed"} — ${
+          item.title || item.type || "Care item"
+        } was due ${Math.abs(days)} day(s) ago.`,
         route: "/care",
       });
     }
@@ -659,7 +833,6 @@ const urgentAlerts = useMemo(() => {
 
   return alerts.slice(0, 6);
 }, [horses, feedInventoryItems, activeReminders, weatherData]);
-
 const openWeatherModal = () => {
   setIsWeatherModalOpen(true);
 };
@@ -668,11 +841,50 @@ const closeWeatherModal = () => {
   setIsWeatherModalOpen(false);
 };
 
-  const openAskLex = () => {
+const startOrOpenSickWatch = async (horse) => {
+  if (!horse?.id) return;
+
+  if (horse.sickWatchOn) {
+    navigate(`/sick-watch?horseId=${horse.id}`);
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Start Sick Watch for ${horse.name || "this horse"}?`
+  );
+
+  if (!confirmed) return;
+
+  try {
+    const startedAt = Date.now();
+
+    await updateDoc(doc(db, "horses", horse.id), {
+  sickWatchOn: true,
+  sickWatchStartedAt: startedAt,
+  activeSickWatchId: `${horse.id}_${startedAt}`,
+  updatedAt: startedAt,
+});
+
+navigate(`/sick-watch?horseId=${horse.id}`, {
+  state: {
+    justStartedSickWatch: true,
+    horseId: horse.id,
+    startedAt,
+  },
+});
+  } catch (e) {
+    console.log("START SICK WATCH ERROR:", e);
+    alert("Could not start Sick Watch.");
+  }
+};
+
+    const openAskLex = () => {
     setIsAskLexOpen(true);
     setLexQuestion("");
     setLexAnswer("");
     setLexLoading(false);
+    setLexPhoto(null);
+    setLexPhotoPreview("");
   };
 
   const closeAskLex = () => {
@@ -680,11 +892,28 @@ const closeWeatherModal = () => {
     setLexQuestion("");
     setLexAnswer("");
     setLexLoading(false);
+    setLexPhoto(null);
+    setLexPhotoPreview("");
   };
 
-  const handleAskLex = async () => {
-    if (!lexQuestion.trim()) {
-      alert("Type a question first.");
+    const handleLexPhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+
+    setLexPhoto(file);
+    setLexPhotoPreview(URL.createObjectURL(file));
+    setLexAnswer("");
+  };
+
+    const handleAskLex = async () => {
+    if (!lexQuestion.trim() && !lexPhoto) {
+      alert("Type a question or choose a photo first.");
       return;
     }
 
@@ -693,7 +922,7 @@ const closeWeatherModal = () => {
 
     try {
       if (typeof onAsk === "function") {
-        const result = await onAsk(lexQuestion.trim());
+                const result = await onAsk(lexQuestion.trim(), lexPhoto);
 
         if (typeof result === "string") {
           setLexAnswer(result);
@@ -824,72 +1053,95 @@ const closeWeatherModal = () => {
   ];
 
   return (
-    <div
+  <div
+    style={{
+      minHeight: "100vh",
+      width: "100%",
+      maxWidth: "100vw",
+      overflowX: "hidden",
+      boxSizing: "border-box",
+      background: homeBg,
+      color: primaryText,
+      paddingBottom: 120,
+    }}
+  >
+ <div
+  style={{
+    paddingTop: 8,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  }}
+>
+  <div>
+    <button
+      onClick={openAskLex}
       style={{
-        minHeight: "100vh",
-        background: homeBg,
-        color: primaryText,
-        paddingBottom: 28,
+        border: `1px solid ${navyBorder}`,
+        borderRadius: 999,
+        padding: "10px 16px",
+        background: navy,
+        color: "#FFFFFF",
+        fontSize: 16,
+        fontWeight: 700,
+        cursor: "pointer",
+        boxShadow: "0 8px 18px rgba(24, 34, 51, 0.18)",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
       }}
     >
-      <div
-        style={{
-          paddingTop: 8,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 12,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 44,
-              lineHeight: 1,
-              fontWeight: 600,
-              letterSpacing: "-0.03em",
-              color: navy,
-            }}
-          >
-            Lex
-          </div>
+      <img
+  src={lexHorseIcon}
+  alt=""
+  aria-hidden="true"
+  style={{
+    width: 22,
+    height: 22,
+    objectFit: "contain",
+    display: "block",
+    filter: "brightness(0) invert(1)",
+  }}
+/>
+      Ask Lex
+    </button>
 
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: 20,
-              color: secondaryText,
-              fontWeight: 400,
-            }}
-          >
-            Equine Care Intelligence
-          </div>
-        </div>
+    <div
+      style={{
+        marginTop: 10,
+        fontSize: 20,
+        color: secondaryText,
+        fontWeight: 400,
+      }}
+    >
+      Equine Care Intelligence
+    </div>
+  </div>
 
-        {user ? (
-          <button
-            onClick={() => setIsMenuOpen(true)}
-            style={{
-              border: `1px solid ${borderColor}`,
-              borderRadius: 14,
-              width: 48,
-              height: 48,
-              background: "#FFFFFF",
-              color: primaryText,
-              cursor: "pointer",
-              boxShadow: "0 4px 10px rgba(0,0,0,0.04)",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            aria-label="Open account menu"
-          >
-            <Menu size={22} strokeWidth={2} />
-          </button>
-        ) : null}
-
-      </div>
+  {user ? (
+    <button
+      onClick={() => setIsMenuOpen(true)}
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 14,
+        width: 48,
+        height: 48,
+        background: "#FFFFFF",
+        color: primaryText,
+        cursor: "pointer",
+        boxShadow: "0 4px 10px rgba(0,0,0,0.04)",
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      aria-label="Open account menu"
+    >
+      <Menu size={22} strokeWidth={2} />
+    </button>
+  ) : null}
+</div>
 
       
      <div
@@ -959,6 +1211,34 @@ const closeWeatherModal = () => {
     {currentWeather}
   </div>
 </div>
+
+<div
+  style={{
+    marginTop: 8,
+    fontSize: 13,
+    color: secondaryText,
+    lineHeight: 1.4,
+  }}
+>
+  {weatherLocation?.name || "Current Location"}
+</div>
+
+{weatherUpdatedAt ? (
+  <div
+    style={{
+      marginTop: 2,
+      fontSize: 12,
+      color: secondaryText,
+      lineHeight: 1.4,
+    }}
+  >
+    Updated{" "}
+    {weatherUpdatedAt.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    })}
+  </div>
+) : null}
 
 <div
   style={{
@@ -1107,15 +1387,14 @@ const closeWeatherModal = () => {
 
     <div style={{ display: "grid", gap: 10 }}>
       {urgentAlerts.map((alert) => (
-        <div
-          key={alert.id}
-          onClick={() => navigate(alert.route)}
+  <div
+    key={alert.id}
           style={{
             border: `1px solid ${borderColor}`,
             borderRadius: 16,
             padding: "12px 14px",
             background: "#F2E8E7",
-            cursor: "pointer",
+            cursor: "default",
           }}
         >
           <div
@@ -1163,262 +1442,225 @@ const closeWeatherModal = () => {
       marginBottom: 12,
     }}
   >
-    Quick Actions
+    My Horses
   </div>
 
-  <div
-    style={{
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 10,
-    }}
-  >
-    <button
-      onClick={() => navigate("/costs")}
+  <div style={{ display: "grid", gap: 12 }}>
+    {horses.map((horse) => (
+      <div
+  key={horse.id}
+  onClick={() => navigate("/horses")}
+  style={{
+  border: `1px solid ${navyBorder}`,
+  borderRadius: 16,
+  padding: 14,
+  background: navy,
+  boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+}}
+      >
+        <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  }}
+>
+  <div>
+    <div
       style={{
-        border: `1px solid ${borderColor}`,
-        borderRadius: 16,
-        padding: "14px 12px",
-        background: "#FBF8F2",
-        color: primaryText,
-        fontWeight: 600,
-        fontSize: 15,
-        cursor: "pointer",
+        fontSize: 20,
+        fontWeight: 700,
+        color: "#FFFFFF",
       }}
     >
-      Add Cost
-    </button>
+      {horse.name || "Unnamed"}
+    </div>
 
-    <button
-      onClick={() => navigate("/care")}
+    <div
       style={{
-        border: `1px solid ${borderColor}`,
-        borderRadius: 16,
-        padding: "14px 12px",
-        background: "#FBF8F2",
-        color: primaryText,
-        fontWeight: 600,
-        fontSize: 15,
-        cursor: "pointer",
+        marginTop: 4,
+        fontSize: 14,
+        color: "rgba(255,255,255,0.82)",
       }}
     >
-      Add Care
-    </button>
+      {horse.age ? `${horse.age} yrs` : ""}
+      {horse.sex ? ` • ${horse.sex}` : ""}
+    </div>
+  </div>
 
-    <button
-      onClick={() => navigate("/horses?openFeedInventory=true")}
+  {horse.photoUrl ? (
+    <img
+      src={horse.photoUrl}
+      alt={horse.name}
       style={{
-        gridColumn: "span 2",
-        border: `1px solid ${borderColor}`,
-        borderRadius: 16,
-        padding: "14px 12px",
-        background: "#FBF8F2",
-        color: primaryText,
+        width: 64,
+        height: 64,
+        borderRadius: "50%",
+        objectFit: "cover",
+        border: "2px solid rgba(255,255,255,0.8)",
+      }}
+    />
+  ) : null}
+</div>
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: 8,
+    marginTop: 14,
+  }}
+>
+  {[
+  { label: "Log", route: `/horses?horseId=${horse.id}&openLog=true` },
+  { label: "Care", route: `/care?horseId=${horse.id}` },
+  { label: "Costs", route: `/costs?horseId=${horse.id}` },
+  { label: "Feed", route: `/horses?horseId=${horse.id}&openFeedInventory=true` },
+  { label: "Docs", route: `/documents?horseId=${horse.id}` },
+  { label: "Sick Watch", action: () => startOrOpenSickWatch(horse) },
+].map((item) => (
+    <button
+      key={item.label}
+onClick={(e) => {
+  e.stopPropagation();
+
+  if (item.action) {
+    item.action();
+    return;
+  }
+
+  navigate(item.route);
+}}
+      style={{
+        border: "1px solid rgba(255,255,255,0.35)",
+        borderRadius: 12,
+        padding: "10px 6px",
+        background: "rgba(255,255,255,0.12)",
+        color: "#FFFFFF",
+        fontSize: 13,
         fontWeight: 600,
-        fontSize: 15,
         cursor: "pointer",
       }}
     >
-      Update Feed Inventory
+      {item.label}
     </button>
+  ))}
+</div>
+
+      </div>
+    ))}
   </div>
 </div>
 
-      {urgentCards.length > 0 ? (
-        <div style={{ marginTop: 22, display: "grid", gap: 12 }}>
-          {urgentCards.map((card) => {
-            const horse = card.horse;
-            const horseName = horse?.name || "Unnamed";
+{careHorses.length > 0 || careHorsesStatus ? (
+  <div
+    style={{
+      marginTop: 14,
+      background: cardBg,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 22,
+      padding: 16,
+      boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+    }}
+  >
+    <div
+      style={{
+        fontSize: 18,
+        fontWeight: 700,
+        color: primaryText,
+        marginBottom: 12,
+      }}
+    >
+      Care Horses
+    </div>
 
-            return (
-              <div
-                key={horse.id}
-                onClick={() => {
-                  if (card.sickWatch) {
-                    navigate(`/sick-watch?horseId=${horse.id}`);
-                    return;
-                  }
-                  if (card.reminder) {
-                    navigate("/care");
-                    return;
-                  }
-                  if (card.event) {
-                    navigate("/events");
-                  }
-                }}
-                style={{
-                  background: cardBg,
-                  border: `1px solid ${borderColor}`,
-                  borderRadius: 18,
-                  padding: "14px 16px",
-                  boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-                  cursor: "pointer",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    marginBottom: 10,
-                  }}
-                >
-                  {card.sickWatch ? (
-                    <div
-                      style={{
-                        background: "#F2E8E7",
-                        color: burgundy,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                      }}
-                    >
-                      Active Sick Watch
-                    </div>
-                  ) : null}
-
-                  {card.reminder ? (
-                    <div
-                      style={{
-                        background: upcomingGoldBg,
-                        color: upcomingGoldText,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                      }}
-                    >
-                      Upcoming Care
-                    </div>
-                  ) : null}
-
-                  {card.event ? (
-                    <div
-                      style={{
-                        background: upcomingGoldBg,
-                        color: upcomingGoldText,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                      }}
-                    >
-                      Event Reminder
-                    </div>
-                  ) : null}
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 600,
-                    color: primaryText,
-                    lineHeight: 1.15,
-                  }}
-                >
-                  {horseName}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-
-      <div
-        style={{
-          marginTop: urgentCards.length ? 18 : 28,
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          alignContent: "stretch",
-        }}
-      >
-        {tiles.map((tile) => (
-          <button
-            key={tile.key}
-            onClick={tile.onClick}
-            style={{
-              ...tileBaseStyle,
-              background: tile.featured
-                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
-                : navy,
-            }}
-            onMouseDown={(e) => {
-              e.currentTarget.style.background = tile.featured
-                ? "linear-gradient(180deg, #273650 0%, #1B2538 100%)"
-                : navyPressed;
-              e.currentTarget.style.transform = "scale(0.985)";
-            }}
-            onMouseUp={(e) => {
-              e.currentTarget.style.background = tile.featured
-                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
-                : navy;
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = tile.featured
-                ? "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)"
-                : navy;
-              e.currentTarget.style.transform = "scale(1)";
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                pointerEvents: "none",
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 42%)",
-              }}
-            />
-
-            <div
-              style={{
-                width: 50,
-                height: 50,
-                borderRadius: 16,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(255,255,255,0.09)",
-                color: "#FFFFFF",
-                border: "1px solid rgba(255,255,255,0.08)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08)",
-                position: "relative",
-                zIndex: 1,
-              }}
-            >
-              {tile.icon}
-            </div>
-
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <div
-                style={{
-                  fontSize: 24,
-                  fontWeight: 600,
-                  lineHeight: 1.1,
-                  color: "#FFFFFF",
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                {tile.title}
-              </div>
-
-              <div
-                style={{
-                  marginTop: 8,
-                  fontSize: 14,
-                  color: "rgba(255,255,255,0.82)",
-                }}
-              >
-                {tile.subtitle}
-              </div>
-            </div>
-          </button>
-        ))}
+    {careHorsesStatus ? (
+      <div style={{ fontSize: 14, color: secondaryText }}>
+        {careHorsesStatus}
       </div>
+    ) : (
+      <div style={{ display: "grid", gap: 12 }}>
+        {careHorses.map((horse) => (
+  <div
+    key={horse.id}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 16,
+      padding: 14,
+      background: "#FBF8F2",
+      boxShadow: "0 8px 18px rgba(0,0,0,0.04)",
+    }}
+  >
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            color: primaryText,
+          }}
+        >
+          {horse.name || "Unnamed"}
+        </div>
+
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 14,
+            color: secondaryText,
+          }}
+        >
+          {horse.age ? `${horse.age} yrs` : ""}
+          {horse.sex ? ` • ${horse.sex}` : ""}
+        </div>
+      </div>
+
+      {horse.photoUrl ? (
+        <img
+          src={horse.photoUrl}
+          alt={horse.name}
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: "50%",
+            objectFit: "cover",
+            border: `2px solid ${borderColor}`,
+          }}
+        />
+      ) : null}
+    </div>
+
+    <button
+  onClick={() => navigate(`/daily-care/${horse.id}?mode=caretaker`)}
+  style={{
+    width: "100%",
+    marginTop: 14,
+    border: `1px solid ${borderColor}`,
+    borderRadius: 14,
+    padding: "12px",
+    background: "#FFFFFF",
+    color: primaryText,
+    fontWeight: 700,
+    fontSize: 15,
+    cursor: "pointer",
+  }}
+>
+  Today's Care
+</button>
+  </div>
+))}
+      </div>
+    )}
+  </div>
+) : null}
 
       {isMenuOpen ? (
         <div className="modal-backdrop" onClick={() => setIsMenuOpen(false)}>
@@ -1617,7 +1859,7 @@ const closeWeatherModal = () => {
   </div>
 ) : null}
 
-      <FloatingAskLex onClick={openAskLex} />
+      
       {isAskLexOpen ? (
         <div className="modal-backdrop" onClick={closeAskLex}>
           <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
@@ -1664,6 +1906,54 @@ const closeWeatherModal = () => {
               rows={5}
               style={{ marginTop: 12 }}
             />
+
+                        <div style={{ marginTop: 12 }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: primaryText,
+                  marginBottom: 6,
+                }}
+              >
+                Add a photo for Lex to review
+              </label>
+
+              <input
+                className="field-input"
+                type="file"
+                accept="image/*"
+                onChange={handleLexPhotoSelect}
+              />
+
+              {lexPhotoPreview ? (
+                <div style={{ marginTop: 10 }}>
+                  <img
+                    src={lexPhotoPreview}
+                    alt="Selected for Lex review"
+                    style={{
+                      width: "100%",
+                      maxHeight: 260,
+                      objectFit: "cover",
+                      borderRadius: 16,
+                      border: `1px solid ${borderColor}`,
+                    }}
+                  />
+
+                  <button
+                    className="small-button"
+                    style={{ marginTop: 10 }}
+                    onClick={() => {
+                      setLexPhoto(null);
+                      setLexPhotoPreview("");
+                    }}
+                  >
+                    Remove Photo
+                  </button>
+                </div>
+              ) : null}
+            </div>
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
               <button className="secondary-button" onClick={closeAskLex}>
@@ -1716,10 +2006,12 @@ const closeWeatherModal = () => {
                   </button>
                 ) : null}
               </div>
-            ) : null}
+                        ) : null}
           </div>
         </div>
       ) : null}
+
+      <BottomNav />
     </div>
   );
 }

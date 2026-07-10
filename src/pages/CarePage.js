@@ -5,6 +5,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   query,
   updateDoc,
@@ -12,7 +13,12 @@ import {
 } from "firebase/firestore";
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
+import { useLocation, useNavigate } from "react-router-dom";
 
+const API_BASE_URL =
+  process.env.NODE_ENV === "development"
+    ? "http://localhost:3000"
+    : "https://lex-equine-api.onrender.com";
 const isOffline = () =>
   typeof navigator !== "undefined" && navigator.onLine === false;
 
@@ -143,8 +149,11 @@ createdAt: item.createdAt || Date.now(),
 });
 
 export default function CarePage({ user, horses = [], onAsk }) {
+  const location = useLocation();
+const navigate = useNavigate();
   const [careItems, setCareItems] = useState([]);
   const [careStatus, setCareStatus] = useState("Loading care schedule...");
+  const selectedHorseId = new URLSearchParams(location.search).get("horseId");
 
   const [isOpen, setIsOpen] = useState(false);
   const [isEditingCare, setIsEditingCare] = useState(false);
@@ -234,7 +243,9 @@ export default function CarePage({ user, horses = [], onAsk }) {
         .sort((a, b) => (a.dueDate || 0) - (b.dueDate || 0));
 
       setCareItems(items);
-      setCareStatus(items.length ? "" : "No care items yet.");
+setCareStatus(items.length ? "" : "No care items yet.");
+
+await checkCareAlerts(items);
     } catch (e) {
       console.log("LOAD CARE ERROR:", e);
       setCareItems([]);
@@ -242,33 +253,112 @@ export default function CarePage({ user, horses = [], onAsk }) {
     }
   };
 
+  const checkCareAlerts = async (items) => {
+  if (!user?.uid || !items?.length) return;
+
+  try {
+    const userSnap = await getDoc(doc(db, "users", user.uid));
+    const userData = userSnap.exists() ? userSnap.data() : null;
+
+    if (!userData?.pushToken) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (const item of items) {
+      const due = new Date(item.dueDate);
+      due.setHours(0, 0, 0, 0);
+
+      const daysUntil = Math.round(
+        (due.getTime() - today.getTime()) / 86400000
+      );
+
+      let pushTitle = "";
+      let pushBody = "";
+      let updateField = "";
+
+      if (
+        daysUntil >= 0 &&
+        daysUntil <= 3 &&
+        !item.upcomingCarePushSent
+      ) {
+        pushTitle = "Upcoming Care Reminder";
+        pushBody = `${item.title || item.type} is coming up for ${item.horseName}.`;
+        updateField = "upcomingCarePushSent";
+      }
+
+      if (
+        daysUntil < 0 &&
+        !item.overdueCarePushSent
+      ) {
+        pushTitle = "Overdue Care Reminder";
+        pushBody = `${item.title || item.type} is overdue for ${item.horseName}.`;
+        updateField = "overdueCarePushSent";
+      }
+
+      if (!pushTitle) continue;
+
+      await fetch(`${API_BASE_URL}/send-push`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: userData.pushToken,
+          title: pushTitle,
+          body: pushBody,
+          data: {
+            type: "care_alert",
+            horseId: item.horseId,
+            reminderId: item.id,
+          },
+        }),
+      });
+
+      await updateDoc(doc(db, "reminders", item.id), {
+        [updateField]: true,
+      });
+    }
+  } catch (e) {
+    console.log("CARE ALERT CHECK ERROR:", e);
+  }
+};
+
   useEffect(() => {
     loadCare();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
+ const visibleCareItems = useMemo(() => {
+  if (!selectedHorseId) return careItems;
+
+  return careItems.filter(
+    (item) => item.horseId === selectedHorseId
+  );
+}, [careItems, selectedHorseId]);
+
   const overdue = useMemo(
-    () => careItems.filter((i) => getDaysUntil(i.dueDate) < 0),
-    [careItems]
+    () => visibleCareItems.filter((i) => getDaysUntil(i.dueDate) < 0),
+    [visibleCareItems]
   );
 
   const today = useMemo(
-    () => careItems.filter((i) => getDaysUntil(i.dueDate) === 0),
-    [careItems]
+    () => visibleCareItems.filter((i) => getDaysUntil(i.dueDate) === 0),
+    [visibleCareItems]
   );
 
   const upcoming = useMemo(
     () =>
-      careItems.filter((i) => {
+      visibleCareItems.filter((i) => {
         const days = getDaysUntil(i.dueDate);
         return days != null && days > 0 && days <= 7;
       }),
-    [careItems]
+    [visibleCareItems]
   );
 
   const later = useMemo(
-    () => careItems.filter((i) => getDaysUntil(i.dueDate) > 7),
-    [careItems]
+    () => visibleCareItems.filter((i) => getDaysUntil(i.dueDate) > 7),
+    [visibleCareItems]
   );
 
   const openAddCare = () => {
@@ -358,11 +448,40 @@ completed: false,
 
         await updateDoc(doc(db, "reminders", editingCareId), payload);
       } else {
-        await addDoc(collection(db, "reminders"), {
-          ...payload,
-          createdAt: Date.now(),
-        });
-      }
+  const savedCareRef = await addDoc(collection(db, "reminders"), {
+  ...payload,
+  upcomingCarePushSent: false,
+  overdueCarePushSent: false,
+  careScheduledPushSentAt: Date.now(),
+  createdAt: Date.now(),
+});
+
+  try {
+    const userSnap = await getDoc(doc(db, "users", user.uid));
+    const userData = userSnap.exists() ? userSnap.data() : null;
+
+    if (userData?.pushToken) {
+      await fetch(`${API_BASE_URL}/send-push`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          token: userData.pushToken,
+          title: "Care Reminder Scheduled",
+          body: `${resolvedTitle} is scheduled for ${payload.horseName}.`,
+          data: {
+            type: "care_scheduled",
+            horseId: payload.horseId,
+            reminderId: savedCareRef.id,
+          },
+        }),
+      });
+    }
+  } catch (pushErr) {
+    console.log("CARE PUSH ERROR:", pushErr);
+  }
+}
 
       await loadCare();
       closeModal();
@@ -694,9 +813,21 @@ completed: false,
             fontWeight: 400,
           }}
         >
-          Appointments and care reminders
+          {selectedHorseId
+  ? `Showing care for ${horseNameById[selectedHorseId] || "this horse"}`
+  : "Appointments and care reminders"}
         </div>
       </div>
+
+      {selectedHorseId ? (
+  <button
+    className="small-button"
+    onClick={() => navigate("/care")}
+    style={{ marginTop: 12 }}
+  >
+    View All Care
+  </button>
+) : null}
 
       <div style={{ marginTop: 18 }}>
         <div
@@ -726,7 +857,7 @@ completed: false,
               lineHeight: 1,
             }}
           >
-            {careItems.length}
+            {visibleCareItems.length}
           </div>
 
           <div

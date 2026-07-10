@@ -375,9 +375,21 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
             fontWeight: 400,
           }}
         >
-          Store important horse paperwork
+          {horseIdFromURL
+  ? `Showing documents for ${horseNameById[horseIdFromURL] || "this horse"}`
+  : "Store important horse paperwork"}
         </div>
       </div>
+
+      {horseIdFromURL ? (
+  <button
+    className="small-button"
+    onClick={() => navigate("/documents")}
+    style={{ marginTop: 12 }}
+  >
+    View All Documents
+  </button>
+) : null}
 
       <div style={{ marginTop: 18 }}>
         <div

@@ -169,19 +169,33 @@ const getFeedInventoryStatus = (item) => {
   const dailyUse = Number(item.dailyUse || 0);
   const lowThresholdDays = Number(item.lowThresholdDays || 3);
 
+  const quantityUpdatedAt = Number(
+    item.quantityUpdatedAt || item.updatedAt || item.createdAt || Date.now()
+  );
+
+  const daysPassed = Math.max(
+    0,
+    Math.floor((Date.now() - quantityUpdatedAt) / 86400000)
+  );
+
+  const adjustedQuantity =
+    dailyUse > 0 ? Math.max(0, quantity - daysPassed * dailyUse) : quantity;
+
   if (!dailyUse || dailyUse <= 0) {
     return {
       daysRemaining: null,
+      displayQuantity: adjustedQuantity,
       isLow: false,
       warningText: "",
     };
   }
 
-  const daysRemaining = Math.floor(quantity / dailyUse);
+  const daysRemaining = Math.floor(adjustedQuantity / dailyUse);
 
-  if (quantity <= 0) {
+  if (adjustedQuantity <= 0) {
     return {
       daysRemaining: 0,
+      displayQuantity: adjustedQuantity,
       isLow: true,
       warningText: `${item.itemName || "This item"} is empty.`,
     };
@@ -190,6 +204,7 @@ const getFeedInventoryStatus = (item) => {
   if (daysRemaining <= lowThresholdDays) {
     return {
       daysRemaining,
+      displayQuantity: adjustedQuantity,
       isLow: true,
       warningText: `${item.itemName || "This item"} may run out in about ${daysRemaining} day(s).`,
     };
@@ -197,6 +212,7 @@ const getFeedInventoryStatus = (item) => {
 
   return {
     daysRemaining,
+    displayQuantity: adjustedQuantity,
     isLow: false,
     warningText: "",
   };
@@ -270,6 +286,12 @@ const [referencePhotoUploading, setReferencePhotoUploading] = useState(false);
   const [careHistoryStatusByHorseId, setCareHistoryStatusByHorseId] =
     useState({});
   const [viewCareHistoryExpanded, setViewCareHistoryExpanded] = useState(false);
+  const [caretakerHistoryByHorseId, setCaretakerHistoryByHorseId] = useState({});
+const [caretakerHistoryStatusByHorseId, setCaretakerHistoryStatusByHorseId] =
+  useState({});
+const [viewCaretakerHistoryExpanded, setViewCaretakerHistoryExpanded] =
+  useState(false);
+  const [selectedCareHistoryItem, setSelectedCareHistoryItem] = useState(null);
 
   const [isHorseLexOpen, setIsHorseLexOpen] = useState(false);
   const [horseLexHorse, setHorseLexHorse] = useState(null);
@@ -292,6 +314,8 @@ const [shareHorseTarget, setShareHorseTarget] = useState(null);
   const [careItems, setCareItems] = useState([]);
   const [isCareOpen, setIsCareOpen] = useState(false);
   const [careHorse, setCareHorse] = useState(null);
+  const [isDailyCarePlanOpen, setIsDailyCarePlanOpen] = useState(false);
+const [dailyCareHorse, setDailyCareHorse] = useState(null);
 
   const [isAddCareOpen, setIsAddCareOpen] = useState(false);
   const [isFeedInventoryOpen, setIsFeedInventoryOpen] = useState(false);
@@ -310,6 +334,8 @@ const [feedInventoryItems, setFeedInventoryItems] = useState([]);
 const [feedInventoryStatus, setFeedInventoryStatus] = useState("");
 const [editingFeedItemId, setEditingFeedItemId] = useState(null);
 const [isFeedFormOpen, setIsFeedFormOpen] = useState(false);
+const [refillFeedItem, setRefillFeedItem] = useState(null);
+const [hayToAdd, setHayToAdd] = useState("");
 
   const [careType, setCareType] = useState("Farrier");
   const [careTitle, setCareTitle] = useState("");
@@ -426,8 +452,9 @@ setReferencePhotos([]);
 
     if (horse?.id) {
       await loadLogHistoryForHorse(horse.id);
-      await loadCareHistoryForHorse(horse.id);
-      await loadSickWatchArchiveForHorse(horse.id);
+await loadCareHistoryForHorse(horse.id);
+await loadCaretakerHistoryForHorse(horse.id);
+await loadSickWatchArchiveForHorse(horse.id);
     }
   };
 
@@ -785,16 +812,56 @@ const handleRemoveReferencePhoto = async (photoToRemove) => {
 
   useEffect(() => {
   const params = new URLSearchParams(location.search);
-  const shouldOpenFeedInventory = params.get("openFeedInventory") === "true";
 
-  if (!shouldOpenFeedInventory) return;
+  const horseId = params.get("horseId");
+  const shouldOpenFeedInventory =
+    params.get("openFeedInventory") === "true";
+    const shouldOpenLog = params.get("openLog") === "true";
+
   if (!horses || horses.length === 0) return;
 
-  openFeedInventory(horses[0]);
+  const selectedHorse = horses.find((h) => h.id === horseId);
 
+  if (shouldOpenFeedInventory && selectedHorse) {
+    openFeedInventory(selectedHorse);
+    navigate("/horses", { replace: true });
+  }
+  if (shouldOpenLog && selectedHorse) {
+  openLog(selectedHorse);
   navigate("/horses", { replace: true });
+}
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [location.search, horses]);
+useEffect(() => {
+  const reopenHorseId = location.state?.reopenHorse;
+  const reopenSection = location.state?.reopenSection;
+
+  if (!reopenHorseId || !horses?.length) return;
+
+  const horseToReopen = horses.find(
+    (horse) => horse.id === reopenHorseId
+  );
+
+  if (!horseToReopen) return;
+
+  const reopenPreviousView = async () => {
+    await openView(horseToReopen);
+
+    if (reopenSection === "caretakerHistory") {
+      setViewCaretakerHistoryExpanded(true);
+    }
+
+    navigate("/horses", {
+      replace: true,
+      state: null,
+    });
+  };
+
+  reopenPreviousView();
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [location.state, horses]);
 
   const openAdd = () => {
     setMode("add");
@@ -908,14 +975,16 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
       }));
 
       const qc = query(
-        collection(db, "care_history"),
-        where("horseId", "==", horseId)
-      );
+  collection(db, "care_history"),
+  where("ownerUid", "==", user.uid),
+  where("horseId", "==", horseId)
+);
 
       const snap = await getDocs(qc);
       const items = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  .map((d) => ({ id: d.id, ...d.data() }))
+  .filter((item) => item.source !== "caretaker_daily_care")
+  .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
 
       setCareHistoryByHorseId((prev) => ({
         ...prev,
@@ -941,6 +1010,56 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
       return [];
     }
   };
+
+  const loadCaretakerHistoryForHorse = async (horseId) => {
+  if (!horseId) return [];
+
+  try {
+    setCaretakerHistoryStatusByHorseId((prev) => ({
+      ...prev,
+      [horseId]: "Loading caretaker history...",
+    }));
+
+    const qc = query(
+      collection(db, "care_history"),
+      where("ownerUid", "==", user.uid),
+      where("horseId", "==", horseId)
+    );
+
+    const snap = await getDocs(qc);
+
+    const items = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((item) => item.source === "caretaker_daily_care")
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+    setCaretakerHistoryByHorseId((prev) => ({
+      ...prev,
+      [horseId]: items,
+    }));
+
+    setCaretakerHistoryStatusByHorseId((prev) => ({
+      ...prev,
+      [horseId]: items.length ? "" : "No caretaker history yet.",
+    }));
+
+    return items;
+  } catch (e) {
+    console.log("LOAD CARETAKER HISTORY ERROR:", e);
+
+    setCaretakerHistoryByHorseId((prev) => ({
+      ...prev,
+      [horseId]: [],
+    }));
+
+    setCaretakerHistoryStatusByHorseId((prev) => ({
+      ...prev,
+      [horseId]: "Could not load caretaker history.",
+    }));
+
+    return [];
+  }
+};
 
   const openEditLog = (log) => {
     setEditingLog(log);
@@ -987,6 +1106,25 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
       alert("Failed to delete log.");
     }
   };
+
+  const deleteCareHistoryEntry = async (item) => {
+  if (!item?.id) return;
+
+  const confirmed = window.confirm("Delete this history entry?");
+  if (!confirmed) return;
+
+  try {
+    await deleteDoc(doc(db, "care_history", item.id));
+
+    if (item.horseId) {
+      await loadCareHistoryForHorse(item.horseId);
+      await loadCaretakerHistoryForHorse(item.horseId);
+    }
+  } catch (e) {
+    console.log("DELETE CARE HISTORY ENTRY ERROR:", e);
+    alert("Failed to delete history entry.");
+  }
+};
 
   const loadSickWatchEntriesForHorse = async (horseId) => {
     if (!horseId) {
@@ -1257,22 +1395,33 @@ const estimatedDepletionDate =
   try {
     if (editingFeedItemId) {
   await updateDoc(doc(db, "feed_inventory", editingFeedItemId), {
-    itemType: feedItemType,
-    itemName: feedItemName.trim(),
-    currentQuantity: quantityNumber,
-    unit: feedUnit,
-    dailyUse: dailyUseNumber,
-    dailyUseUnit: feedDailyUseUnit,
-    usageFrequency: feedUsageFrequency,
-    flakesPerBale: feedFlakesPerBale || null,
-    lowThresholdDays: Number.isNaN(lowThresholdNumber)
-      ? null
-      : lowThresholdNumber,
-      estimatedDaysRemaining,
+  itemType: feedItemType,
+  itemName: feedItemName.trim(),
+  currentQuantity: quantityNumber,
+  unit: feedUnit,
+  dailyUse: dailyUseNumber,
+  dailyUseUnit: feedDailyUseUnit,
+  usageFrequency: feedUsageFrequency,
+  flakesPerBale: feedFlakesPerBale || null,
+  lowThresholdDays: Number.isNaN(lowThresholdNumber)
+    ? null
+    : lowThresholdNumber,
+  estimatedDaysRemaining,
 estimatedDepletionDate,
-    notes: feedNotes.trim(),
-    updatedAt: Date.now(),
-  });
+quantityUpdatedAt: Date.now(),
+
+  // reset warning if user refilled inventory
+  lowFeedPushSent:
+    estimatedDaysRemaining >
+    (Number.isNaN(lowThresholdNumber)
+      ? 3
+      : lowThresholdNumber)
+      ? false
+      : true,
+
+  notes: feedNotes.trim(),
+  updatedAt: Date.now(),
+});
 } else {
   await addDoc(collection(db, "feed_inventory"), {
       ownerUid: user.uid,
@@ -1291,9 +1440,11 @@ lowThresholdDays: Number.isNaN(lowThresholdNumber)
   : lowThresholdNumber,
 estimatedDaysRemaining,
 estimatedDepletionDate,
-      notes: feedNotes.trim(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+quantityUpdatedAt: Date.now(),
+refillQuantity: feedItemType === "Hay" ? null : quantityNumber,
+notes: feedNotes.trim(),
+createdAt: Date.now(),
+updatedAt: Date.now(),
     });
   }
 
@@ -1304,7 +1455,14 @@ estimatedDepletionDate,
       ? 3
       : lowThresholdNumber);
 
-if (isLowInventory) {
+  const existingFeedItem = editingFeedItemId
+  ? feedInventoryItems.find((item) => item.id === editingFeedItemId)
+  : null;
+
+const shouldSendLowFeedPush =
+  isLowInventory && !existingFeedItem?.lowFeedPushSent;
+
+if (shouldSendLowFeedPush) {
   try {
     const userSnap = await getDoc(doc(db, "users", user.uid));
 const userData = userSnap.exists() ? userSnap.data() : null;
@@ -1325,6 +1483,12 @@ const userData = userSnap.exists() ? userSnap.data() : null;
           },
         }),
       });
+      if (editingFeedItemId) {
+  await updateDoc(doc(db, "feed_inventory", editingFeedItemId), {
+    lowFeedPushSent: true,
+    lowFeedPushSentAt: Date.now(),
+  });
+}
     }
   } catch (pushErr) {
     console.log("LOW FEED PUSH ERROR:", pushErr);
@@ -1375,21 +1539,54 @@ setIsFeedFormOpen(false);
       return false;
     }
 
-    try {
-      await addDoc(collection(db, "reminders"), {
-        ownerUid: user.uid,
-        horseId: careHorse.id,
-        horseName: careHorse.name || "Unnamed",
-        type: careType,
-        title: careTitle.trim() || careType,
-        dueDate: dueDateMs,
-        time: careTime || "",
-        repeatInterval,
-        alertTiming,
-        notes: careNotes.trim(),
-        completed: false,
-        createdAt: Date.now(),
-      });
+   try {
+  const savedCareRef = await addDoc(collection(db, "reminders"), {
+    ownerUid: user.uid,
+    horseId: careHorse.id,
+    horseName: careHorse.name || "Unnamed",
+    type: careType,
+    title: careTitle.trim() || careType,
+    dueDate: dueDateMs,
+    time: careTime || "",
+    repeatInterval,
+    alertTiming,
+    notes: careNotes.trim(),
+    completed: false,
+    createdAt: Date.now(),
+  });
+
+try {
+  console.log("CARE PUSH BLOCK STARTED");
+  const userSnap = await getDoc(doc(db, "users", user.uid));
+  const userData = userSnap.exists() ? userSnap.data() : null;
+
+  console.log("CARE PUSH DEBUG:", {
+  hasUserData: !!userData,
+  hasPushToken: !!userData?.pushToken,
+  apiBaseUrl: API_BASE_URL,
+});
+
+  if (userData?.pushToken) {
+    await fetch(`${API_BASE_URL}/send-push`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token: userData.pushToken,
+        title: "Care Reminder Added",
+        body: `${careTitle.trim() || careType} is scheduled for ${careHorse.name || "your horse"}.`,
+        data: {
+          type: "care_added",
+          horseId: careHorse.id,
+          reminderId: savedCareRef.id,
+        },
+      }),
+    });
+  }
+} catch (pushErr) {
+  console.log("CARE PUSH ERROR:", pushErr);
+}
 
       await loadCareItems();
       clearCareForm();
@@ -1568,11 +1765,13 @@ blanketNotes: cleanText(blanketNotes),
 
     if (mode === "add") {
       await addDoc(collection(db, "horses"), {
-        ownerUid: user.uid,
-        ...horsePayload,
-        sickWatchOn: false,
-        createdAt: Date.now(),
-      });
+  ownerUid: user.uid,
+  caretakerUids: [],
+  ...horsePayload,
+  sickWatchOn: false,
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
     } else {
       if (!editingHorseId) {
         alert("No horse selected to edit.");
@@ -2278,9 +2477,9 @@ const textHorseCareInstructions = async (horse) => {
 
                         <div
                           style={{
-                            width: 72,
-                            height: 72,
-                            borderRadius: 16,
+                            width: 110,
+height: 110,
+borderRadius: "50%",
                             overflow: "hidden",
                             background: "#EAE7DF",
                             flexShrink: 0,
@@ -2329,7 +2528,8 @@ const textHorseCareInstructions = async (horse) => {
                           display: "flex",
                           gap: 10,
                           flexWrap: "wrap",
-                          marginTop: 18,
+                          marginTop: 14,
+marginBottom: 14,
                         }}
                       >
                         <button
@@ -2343,6 +2543,13 @@ const textHorseCareInstructions = async (horse) => {
                         </button>
 
                         <button
+  className="small-button"
+  onClick={() => navigate(`/daily-care/${h.id}`)}
+>
+  Daily Care Plan
+</button>
+
+                        <button
                           className="small-button"
                           onClick={() => {
                             setActiveHorseId(h.id);
@@ -2353,125 +2560,135 @@ const textHorseCareInstructions = async (horse) => {
                         </button>
                       </div>
 
-                      <div
-                        style={{
-                          height: 1,
-                          background: borderColor,
-                          marginTop: 18,
-                          marginBottom: 16,
-                        }}
-                      />
+                      
 
                       <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr 1fr",
-                          gap: 12,
-                          marginTop: 0,
-                        }}
-                      >
-                        <button
-                          onClick={() => openLog(h)}
-                          style={{
-                            border: `1px solid ${borderColor}`,
-                            borderRadius: 15,
-                            padding: "14px 16px",
-                            background: softBg,
-                            color: "#6C6254",
-                            fontWeight: 500,
-                            fontSize: 16,
-                            cursor: "pointer",
-                          }}
-                        >
-                          Log
-                        </button>
+  style={{
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 10,
+  marginTop: 0,
+}}
+>
+  <button
+    onClick={() => openLog(h)}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 15,
+      padding: "14px 16px",
+      background: softBg,
+      color: "#6C6254",
+      fontWeight: 500,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Log
+  </button>
 
-                        <button
-                          onClick={() => openCareModal(h)}
-                          style={{
-                            border: `1px solid ${borderColor}`,
-                            borderRadius: 15,
-                            padding: "14px 16px",
-                            background: softBg,
-                            color: "#6C6254",
-                            fontWeight: 500,
-                            fontSize: 16,
-                            cursor: "pointer",
-                          }}
-                        >
-                          Care
-                        </button>
+  <button
+    onClick={() => navigate(`/care?horseId=${h.id}`)}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 15,
+      padding: "14px 16px",
+      background: softBg,
+      color: "#6C6254",
+      fontWeight: 500,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Care
+  </button>
 
-                        {!h.sickWatchOn ? (
-                          <button
-                            onClick={() => startSickWatch(h.id)}
-                            style={{
-                              border: `1px solid ${borderColor}`,
-                              borderRadius: 15,
-                              padding: "14px 16px",
-                              background: softBg,
-                              color: burgundy,
-                              fontWeight: 600,
-                              fontSize: 16,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Sick Watch
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => navigate(`/sick-watch?horseId=${h.id}`)}
-                            style={{
-                              border: `1px solid ${borderColor}`,
-                              borderRadius: 15,
-                              padding: "14px 16px",
-                              background: softBg,
-                              color: "#6C6254",
-                              fontWeight: 500,
-                              fontSize: 16,
-                              cursor: "pointer",
-                            }}
-                          >
-                            View Sick Watch
-                          </button>
-                        )}
+  <button
+    onClick={() => navigate(`/costs?horseId=${h.id}`)}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 15,
+      padding: "14px 16px",
+      background: softBg,
+      color: "#6C6254",
+      fontWeight: 500,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Costs
+  </button>
 
-                        <button
-                          onClick={() => openHorseLex(h)}
-                          style={{
-                            border: `1px solid ${navyBorder}`,
-                            borderRadius: 15,
-                            padding: "14px 16px",
-                            background:
-                              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)",
-                            color: "#FFFFFF",
-                            fontWeight: 600,
-                            fontSize: 16,
-                            cursor: "pointer",
-                            boxShadow: "0 8px 16px rgba(24, 34, 51, 0.16)",
-                            letterSpacing: "-0.01em",
-                          }}
-                          onMouseDown={(e) => {
-                            e.currentTarget.style.background =
-                              "linear-gradient(180deg, #273650 0%, #1B2538 100%)";
-                            e.currentTarget.style.transform = "scale(0.98)";
-                          }}
-                          onMouseUp={(e) => {
-                            e.currentTarget.style.background =
-                              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
-                            e.currentTarget.style.transform = "scale(1)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background =
-                              "linear-gradient(180deg, #2E3F5D 0%, #24324A 100%)";
-                            e.currentTarget.style.transform = "scale(1)";
-                          }}
-                        >
-                          Lex This Horse
-                        </button>
+  <button
+    onClick={() => openFeedInventory(h)}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 15,
+      padding: "14px 16px",
+      background: softBg,
+      color: "#6C6254",
+      fontWeight: 500,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Feed
+  </button>
+
+  <button
+    onClick={() => navigate(`/documents?horseId=${h.id}`)}
+    style={{
+      border: `1px solid ${borderColor}`,
+      borderRadius: 15,
+      padding: "14px 16px",
+      background: softBg,
+      color: "#6C6254",
+      fontWeight: 500,
+      fontSize: 16,
+      cursor: "pointer",
+    }}
+  >
+    Docs
+  </button>
+
+  {!h.sickWatchOn ? (
+    <button
+      onClick={() => startSickWatch(h.id)}
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 15,
+        padding: "14px 16px",
+        background: softBg,
+        color: burgundy,
+        fontWeight: 600,
+        fontSize: 16,
+        cursor: "pointer",
+      }}
+    >
+      Sick Watch
+    </button>
+  ) : (
+    <button
+      onClick={() => navigate(`/sick-watch?horseId=${h.id}`)}
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 15,
+        padding: "14px 16px",
+        background: softBg,
+        color: "#6C6254",
+        fontWeight: 500,
+        fontSize: 16,
+        cursor: "pointer",
+      }}
+    >
+      View Sick Watch
+    </button>
+  )}
+</div>
+
+                        
                       </div>
                     </div>
-                  </div>
+                
                 );
               })}
           </div>
@@ -2977,14 +3194,16 @@ viewHorse.referencePhotos.length > 0 ? (
                     <div style={{ display: "grid", gap: 10 }}>
                       {(careHistoryByHorseId[viewHorse.id] || []).map((item) => (
                         <div
-                          key={item.id}
-                          style={{
-                            padding: 14,
-                            border: `1px solid ${borderColor}`,
-                            borderRadius: 14,
-                            background: "#FCFBF8",
-                          }}
-                        >
+  key={item.id}
+  onClick={() => navigate(`/care-history/${item.id}`)}
+  style={{
+    padding: 14,
+    border: `1px solid ${borderColor}`,
+    borderRadius: 14,
+    background: "#FCFBF8",
+    cursor: "pointer",
+  }}
+>
                           <div style={{ fontSize: 14, color: secondaryText }}>
                             {item.completedAt
                               ? formatCareDate(item.completedAt)
@@ -3027,6 +3246,28 @@ viewHorse.referencePhotos.length > 0 ? (
                               {item.notes}
                             </div>
                           ) : null}
+<div
+  style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    marginTop: 10,
+  }}
+>
+  <button
+    className="small-button"
+    onClick={(e) => {
+      e.stopPropagation();
+      deleteCareHistoryEntry(item);
+    }}
+    style={{
+      borderColor: burgundy,
+      color: burgundy,
+    }}
+  >
+    Delete
+  </button>
+</div>
+
                         </div>
                       ))}
                     </div>
@@ -3034,6 +3275,129 @@ viewHorse.referencePhotos.length > 0 ? (
                 </div>
               ) : null}
             </div>
+
+            <div
+  style={{
+    marginTop: 20,
+    paddingTop: 14,
+    borderTop: `1px solid ${borderColor}`,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+      flexWrap: "wrap",
+    }}
+  >
+    <div style={{ fontSize: 20, fontWeight: 600, color: primaryText }}>
+      Caretaker History
+    </div>
+
+    <button
+      className="small-button"
+      onClick={() =>
+        setViewCaretakerHistoryExpanded((prev) => !prev)
+      }
+    >
+      {viewCaretakerHistoryExpanded ? "Hide History" : "View History"}
+    </button>
+  </div>
+
+  {viewCaretakerHistoryExpanded ? (
+    <div style={{ marginTop: 12 }}>
+      {(caretakerHistoryByHorseId[viewHorse.id] || []).length === 0 ? (
+        <div style={{ fontSize: 14, color: secondaryText }}>
+          {caretakerHistoryStatusByHorseId[viewHorse.id] ||
+            "No caretaker history yet."}
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {(caretakerHistoryByHorseId[viewHorse.id] || []).map((item) => (
+            <div
+              key={item.id}
+              onClick={() => navigate(`/care-history/${item.id}`)}
+              style={{
+                padding: 14,
+                border: `1px solid ${borderColor}`,
+                borderRadius: 14,
+                background: "#FCFBF8",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ fontSize: 14, color: secondaryText }}>
+                {item.completedAt
+                  ? formatCareDate(item.completedAt)
+                  : "Unknown date"}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 15,
+                  color: primaryText,
+                  fontWeight: 600,
+                }}
+              >
+                Daily Care Completed
+              </div>
+
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 14,
+                  color: secondaryText,
+                }}
+              >
+                {item.caretakerName || "Caretaker"}
+                {(item.completedItems || []).length
+                  ? ` · ${(item.completedItems || []).length} task(s) completed`
+                  : ""}
+              </div>
+
+              {item.notes ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 14,
+                    color: primaryText,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {item.notes}
+                </div>
+              ) : null}
+<div
+  style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    marginTop: 10,
+  }}
+>
+  <button
+    className="small-button"
+    onClick={(e) => {
+      e.stopPropagation();
+      deleteCareHistoryEntry(item);
+    }}
+    style={{
+      borderColor: burgundy,
+      color: burgundy,
+    }}
+  >
+    Delete
+  </button>
+</div>
+
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null}
+</div>
 
             <div
               style={{
@@ -4533,7 +4897,10 @@ viewHorse.referencePhotos.length > 0 ? (
               </div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
-                {feedInventoryItems.map((item) => (
+                {feedInventoryItems.map((item) => {
+  const inventoryStatus = getFeedInventoryStatus(item);
+
+  return (
                   <div
                     key={item.id}
                     style={{
@@ -4560,7 +4927,7 @@ viewHorse.referencePhotos.length > 0 ? (
                         marginTop: 4,
                       }}
                     >
-                      On hand: {item.currentQuantity || 0} {item.unit || ""}
+                      Estimated on hand: {inventoryStatus.displayQuantity ?? 0} {item.unit || ""}
                     </div>
 
                     <div
@@ -4592,7 +4959,7 @@ viewHorse.referencePhotos.length > 0 ? (
         {inventoryStatus.daysRemaining != null
           ? inventoryStatus.daysRemaining
           : item.estimatedDaysRemaining || 0}{" "}
-        day(s) remaining
+        ≈ day(s) remaining
       </div>
 
       {inventoryStatus.isLow ? (
@@ -4616,12 +4983,19 @@ viewHorse.referencePhotos.length > 0 ? (
 })()}
 
                     <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                      <button
-                        className="small-button"
-                        onClick={() => editFeedInventoryItem(item)}
-                      >
-                        Edit
-                      </button>
+  <button
+    className="small-button"
+    onClick={() => setRefillFeedItem(item)}
+  >
+    {item.itemType === "Hay" ? "+ Hay" : "Refill"}
+  </button>
+
+  <button
+    className="small-button"
+    onClick={() => editFeedInventoryItem(item)}
+  >
+    Edit
+  </button>
 
                       <button
                         className="small-button"
@@ -4632,7 +5006,8 @@ viewHorse.referencePhotos.length > 0 ? (
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -4842,6 +5217,97 @@ viewHorse.referencePhotos.length > 0 ? (
           </div>
         </div>
       )}
+    </div>
+  </div>
+) : null}
+
+{refillFeedItem ? (
+  <div className="modal-backdrop" onClick={() => setRefillFeedItem(null)}>
+    <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-handle" />
+
+      <h3 style={{ marginTop: 0 }}>
+        {refillFeedItem.itemType === "Hay" ? "+ Hay" : "Refill"}
+      </h3>
+
+      <p style={{ color: secondaryText }}>
+        {refillFeedItem.itemType === "Hay"
+          ? "How many bales did you add?"
+          : `Refill ${refillFeedItem.itemName || "this item"}?`}
+      </p>
+      {refillFeedItem.itemType === "Hay" && (
+  <input
+    type="number"
+    min="1"
+    value={hayToAdd}
+    onChange={(e) => setHayToAdd(e.target.value)}
+    placeholder="Number of bales"
+    style={{
+      width: "100%",
+      marginTop: 12,
+      padding: 10,
+      borderRadius: 10,
+      border: `1px solid ${borderColor}`,
+      fontSize: 16,
+      boxSizing: "border-box",
+    }}
+  />
+)}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <button className="secondary-button" onClick={() => setRefillFeedItem(null)}>
+          Cancel
+        </button>
+
+        <button
+  className="primary-button"
+  onClick={async () => {
+    if (refillFeedItem.itemType === "Hay") {
+  const addedHay = Number(hayToAdd);
+
+  if (Number.isNaN(addedHay) || addedHay <= 0) {
+    alert("Enter the number of bales you added.");
+    return;
+  }
+
+  await updateDoc(
+    doc(db, "feed_inventory", refillFeedItem.id),
+    {
+      currentQuantity: (refillFeedItem.currentQuantity ?? 0) + addedHay,
+      quantityUpdatedAt: Date.now(),
+      updatedAt: Date.now(),
+      lowFeedPushSent: false,
+    }
+  );
+
+  await loadFeedInventory(feedInventoryHorse.id);
+
+  setHayToAdd("");
+  setRefillFeedItem(null);
+  return;
+}
+console.log("REFILL ITEM:", refillFeedItem);
+
+    await updateDoc(
+  doc(db, "feed_inventory", refillFeedItem.id),
+  {
+    currentQuantity:
+  (refillFeedItem.currentQuantity ?? 0) +
+  (refillFeedItem.refillQuantity ?? 0),
+    quantityUpdatedAt: Date.now(),
+    updatedAt: Date.now(),
+    lowFeedPushSent: false,
+  }
+);
+
+await loadFeedInventory(feedInventoryHorse.id);
+
+    setRefillFeedItem(null);
+  }}
+>
+  {refillFeedItem.itemType === "Hay" ? "Add" : "Refill"}
+</button>
+      </div>
     </div>
   </div>
 ) : null}

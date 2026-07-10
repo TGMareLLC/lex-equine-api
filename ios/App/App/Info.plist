@@ -41,12 +41,14 @@
 	<string>Lex may save photos when adding horse profiles.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Lex needs access to your photos to add a horse photo.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
+	<key>CFBundleGetInfoString</key>
+	<string></string>
+	<key>CFBundleSignature</key>
+	<string></string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>

@@ -506,16 +506,34 @@ app.post("/refresh-faq", async (req, res) => {
 
 app.post("/send-push", async (req, res) => {
   try {
-    const { token, title, body, data } = req.body;
+    const { token, ownerUid, title, body, data } = req.body;
 
-    if (!token || !title || !body) {
+    let finalToken = token || "";
+
+    if (!finalToken && ownerUid) {
+      const ownerSnap = await firestore
+        .collection("users")
+        .doc(ownerUid)
+        .get();
+
+      if (!ownerSnap.exists) {
+        return res.status(404).json({
+          error: "Owner user record not found.",
+        });
+      }
+
+      const ownerData = ownerSnap.data();
+      finalToken = ownerData?.pushToken || "";
+    }
+
+    if (!finalToken || !title || !body) {
       return res.status(400).json({
-        error: "Missing token, title, or body",
+        error: "Missing push token, title, or body.",
       });
     }
 
     const message = {
-      token,
+      token: finalToken,
       notification: {
         title,
         body,

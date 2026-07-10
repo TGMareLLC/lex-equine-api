@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import imageCompression from "browser-image-compression";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage, auth } from "../firebase";
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 import {
-  addDoc,
+    addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
@@ -61,8 +62,13 @@ const getActiveIncidentId = (horse) => {
 };
 
 export default function SickWatchPage({ horses = [], onAsk }) {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const horseIdFromURL = searchParams.get("horseId");
+  const justStartedSickWatch = location.state?.justStartedSickWatch;
+  const startedAtFromState = location.state?.startedAt;
+
+  const [freshStartedHorse, setFreshStartedHorse] = useState(null);
 
   const [entries, setEntries] = useState([]);
   const [entriesStatus, setEntriesStatus] = useState("");
@@ -143,9 +149,51 @@ export default function SickWatchPage({ horses = [], onAsk }) {
     return emptyContact();
   };
 
+  useEffect(() => {
+  const loadFreshStartedHorse = async () => {
+    if (!justStartedSickWatch || !horseIdFromURL) return;
+
+    const alreadyLoaded = horses.some(
+      (horse) => horse.id === horseIdFromURL && horse.sickWatchOn
+    );
+
+    if (alreadyLoaded) return;
+
+    try {
+      const horseRef = doc(db, "horses", horseIdFromURL);
+      const horseSnap = await getDoc(horseRef);
+
+      if (!horseSnap.exists()) return;
+
+      const horseData = {
+        id: horseSnap.id,
+        ...horseSnap.data(),
+      };
+
+      if (horseData.sickWatchOn) {
+        setFreshStartedHorse(horseData);
+      }
+    } catch (e) {
+      console.log("LOAD FRESH STARTED HORSE ERROR:", e);
+    }
+  };
+
+  loadFreshStartedHorse();
+}, [justStartedSickWatch, horseIdFromURL, horses]);
+
   const sickWatchHorses = useMemo(() => {
-    return (horses || []).filter((h) => h.sickWatchOn);
-  }, [horses]);
+  const active = (horses || []).filter((h) => h.sickWatchOn);
+
+  if (
+    freshStartedHorse?.id &&
+    freshStartedHorse.sickWatchOn &&
+    !active.some((horse) => horse.id === freshStartedHorse.id)
+  ) {
+    return [freshStartedHorse, ...active];
+  }
+
+  return active;
+}, [horses, freshStartedHorse]);
 
   const sortedSickWatchHorses = useMemo(() => {
     if (!horseIdFromURL) return sickWatchHorses;
@@ -438,9 +486,10 @@ export default function SickWatchPage({ horses = [], onAsk }) {
       const incidentId = getActiveIncidentId(horse);
 
       await addDoc(collection(db, "sickwatch"), {
-        horseId,
-        incidentId,
-        temperature: selectedEntryFields.includes("temp") ? entryForm.temp : "",
+  ownerUid: auth.currentUser?.uid || "",
+  horseId,
+  incidentId,
+  temperature: selectedEntryFields.includes("temp") ? entryForm.temp : "",
         manure: selectedEntryFields.includes("manure") ? entryForm.manure : "",
         urine: selectedEntryFields.includes("urine") ? entryForm.urine : "",
         water: selectedEntryFields.includes("water") ? entryForm.water : "",
@@ -503,8 +552,9 @@ export default function SickWatchPage({ horses = [], onAsk }) {
       }));
 
       await addDoc(collection(db, "sickwatch_archive"), {
-        horseId,
-        horseName: horse?.name || horseName || "Unnamed",
+  ownerUid: auth.currentUser?.uid || "",
+  horseId,
+  horseName: horse?.name || horseName || "Unnamed",
         incidentId: getActiveIncidentId(horse),
         startedAt: horse?.sickWatchStartedAt || null,
         endedAt: Date.now(),

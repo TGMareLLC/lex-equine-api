@@ -16,6 +16,7 @@ import {
   getDoc,
   getDocFromServer,
   setDoc,
+  documentId,
 } from "firebase/firestore";
 import { App as CapApp } from "@capacitor/app";
 import { LocalNotifications } from "@capacitor/local-notifications";
@@ -43,6 +44,11 @@ import DocumentsPage from "./pages/DocumentsPage";
 import DocumentDetailPage from "./pages/DocumentDetailPage";
 import AccountPage from "./pages/AccountPage";
 import OfflineBanner from "./components/OfflineBanner";
+import CaretakersPage from "./pages/CaretakersPage";
+import CaretakerDetailPage from "./pages/CaretakerDetailPage";
+import CaretakerInvitePage from "./pages/CaretakerInvitePage";
+import DailyCarePlanPage from "./pages/DailyCarePlanPage";
+import CareHistoryDetailPage from "./pages/CareHistoryDetailPage";
 
 import {
   markAppActiveNow,
@@ -341,6 +347,8 @@ function AppRoutes(props) {
     horses,
     setHorses,
     horsesStatus,
+        careHorses,
+    careHorsesStatus,
     setHorsesStatus,
     activeHorseId,
     setActiveHorseId,
@@ -476,6 +484,8 @@ function AppRoutes(props) {
                 user={user}
                 role={role}
                 horses={horses}
+                careHorses={careHorses}
+careHorsesStatus={careHorsesStatus}
                 activeHorseId={activeHorseId}
                 question={question}
                 setQuestion={setQuestion}
@@ -580,6 +590,48 @@ function AppRoutes(props) {
           }
         />
 
+                <Route
+          path="/caretakers"
+          element={
+            <ProtectedRoute user={user}>
+              <CaretakersPage user={user} horses={horses} />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+  path="/caretakers/:caretakerId"
+  element={
+    <ProtectedRoute user={user}>
+      <CaretakerDetailPage
+        user={user}
+        horses={horses}
+      />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/daily-care/:horseId"
+  element={
+    <ProtectedRoute user={user}>
+      <DailyCarePlanPage
+  user={user}
+  horses={[...horses, ...careHorses]}
+/>
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/care-history/:historyId"
+  element={
+    <ProtectedRoute user={user}>
+      <CareHistoryDetailPage user={user} />
+    </ProtectedRoute>
+  }
+/>
+
         <Route
           path="/documents"
           element={
@@ -597,6 +649,12 @@ function AppRoutes(props) {
             </ProtectedRoute>
           }
         />
+
+        <Route
+  path="/caretaker-invite/:inviteId"
+  element={<CaretakerInvitePage user={user} />}
+/>
+
 
         <Route
           path="*"
@@ -618,6 +676,8 @@ export default function App() {
   const [horses, setHorses] = useState([]);
   const [activeHorseId, setActiveHorseId] = useState("");
   const [horsesStatus, setHorsesStatus] = useState("");
+  const [careHorses, setCareHorses] = useState([]);
+const [careHorsesStatus, setCareHorsesStatus] = useState("");
 
   const [resources, setResources] = useState([]);
   const [resourcesStatus, setResourcesStatus] = useState("Loading resources...");
@@ -676,10 +736,12 @@ const accessState = hasPaidSubscription || hasAccessOverride
 
   const loadHorsesForUser = async (uid) => {
     if (!uid) {
-      setHorses([]);
-      setHorsesStatus("");
-      return;
-    }
+  setHorses([]);
+  setHorsesStatus("");
+  setCareHorses([]);
+  setCareHorsesStatus("");
+  return;
+}
 
     try {
       setHorsesStatus("Loading horses...");
@@ -687,6 +749,64 @@ const accessState = hasPaidSubscription || hasAccessOverride
       const qh = query(collection(db, "horses"), where("ownerUid", "==", uid));
       const hsnap = await getDocs(qh);
       const hitems = hsnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const careAccessQuery = query(
+  collection(db, "caretakerAccess"),
+  where("caretakerUid", "==", uid),
+  where("status", "==", "active")
+);
+
+const careAccessSnap = await getDocs(careAccessQuery);
+
+const careHorseIds = [
+  ...new Set(
+    careAccessSnap.docs.flatMap((docSnap) => docSnap.data().horseIds || [])
+  ),
+];
+
+const careAccessByHorseId = {};
+
+careAccessSnap.docs.forEach((docSnap) => {
+  const access = { id: docSnap.id, ...docSnap.data() };
+
+  (access.horseIds || []).forEach((horseId) => {
+    careAccessByHorseId[horseId] = access;
+  });
+});
+
+setCareHorses([]);
+setCareHorsesStatus(
+  careHorseIds.length ? "Loading care horses..." : ""
+);
+
+let careHorseItems = [];
+
+if (careHorseIds.length > 0) {
+  const careHorseQuery = query(
+    collection(db, "horses"),
+    where(documentId(), "in", careHorseIds.slice(0, 10))
+  );
+
+  const careHorseSnap = await getDocs(careHorseQuery);
+
+  careHorseItems = careHorseSnap.docs.map((d) => {
+  const access = careAccessByHorseId[d.id];
+
+  return {
+  id: d.id,
+  ...d.data(),
+  isCareHorse: true,
+  caretakerAccessId: access?.id || "",
+  caretakerPermissions: access?.permissions || {},
+  caretakerOwnerUid: access?.ownerUid || "",
+  caretakerName: access?.caretakerName || "",
+};
+});
+}
+
+setCareHorses(careHorseItems);
+setCareHorsesStatus(
+  careHorseItems.length ? "" : careHorseIds.length ? "Could not load care horses." : ""
+);
 
       setHorses(hitems);
       setHorsesStatus(hitems.length ? "" : "No horses added yet.");
@@ -1226,6 +1346,8 @@ if (user && accessState === "NO_ACCESS") {
           setHorses={setHorses}
           horsesStatus={horsesStatus}
           setHorsesStatus={setHorsesStatus}
+          careHorses={careHorses}
+careHorsesStatus={careHorsesStatus}
           activeHorseId={activeHorseId}
           setActiveHorseId={setActiveHorseId}
           question={question}

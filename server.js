@@ -560,6 +560,79 @@ app.post("/send-push", async (req, res) => {
   }
 });
 
+app.get("/process-event-reminders", async (req, res) => {
+  try {
+    const now = Date.now();
+
+    const snap = await firestore
+      .collection("events")
+      .where("eventAlertPushSent", "==", false)
+      .get();
+
+    let sentCount = 0;
+
+    for (const eventDoc of snap.docs) {
+      const event = eventDoc.data();
+
+      if (event.completed) continue;
+      if (!event.reminderAt) continue;
+      if (event.reminder === "none") continue;
+      if (event.reminderAt > now) continue;
+
+      const ownerUid = event.ownerUid;
+
+      if (!ownerUid) continue;
+
+      const ownerSnap = await firestore
+        .collection("users")
+        .doc(ownerUid)
+        .get();
+
+      if (!ownerSnap.exists) continue;
+
+      const ownerData = ownerSnap.data();
+      const pushToken = ownerData?.pushToken;
+
+      if (!pushToken) continue;
+
+      const message = {
+        token: pushToken,
+        notification: {
+          title: "Upcoming Event",
+          body: `${event.name || "Your event"} is coming up${
+            event.time ? ` at ${event.time}` : ""
+          }.`,
+        },
+        data: {
+          type: "event_alert",
+          eventId: eventDoc.id,
+          horseId: event.horseId || "",
+        },
+      };
+
+      await admin.messaging(firebaseApp).send(message);
+
+      await eventDoc.ref.update({
+        eventAlertPushSent: true,
+        eventAlertPushSentAt: Date.now(),
+      });
+
+      sentCount += 1;
+    }
+
+    res.json({
+      success: true,
+      sentCount,
+    });
+  } catch (e) {
+    console.log("PROCESS EVENT REMINDERS ERROR:", e);
+
+    res.status(500).json({
+      error: e.message,
+    });
+  }
+});
+
 app.get("/test-push", async (req, res) => {
   try {
     const message = {

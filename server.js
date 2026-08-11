@@ -703,6 +703,100 @@ app.get("/process-care-reminders", async (req, res) => {
   }
 });
 
+app.get("/process-feed-inventory-reminders", async (req, res) => {
+  try {
+    const now = Date.now();
+
+    const snap = await firestore
+      .collection("feed_inventory")
+      .where("lowFeedPushSent", "==", false)
+      .get();
+
+    let sentCount = 0;
+
+    for (const itemDoc of snap.docs) {
+      const item = itemDoc.data();
+
+      const quantity = Number(item.currentQuantity || 0);
+      const dailyUse = Number(item.dailyUse || 0);
+      const lowThresholdDays = Number(item.lowThresholdDays || 3);
+
+      const quantityUpdatedAt = Number(
+        item.quantityUpdatedAt ||
+          item.updatedAt ||
+          item.createdAt ||
+          now
+      );
+
+      const daysPassed = Math.max(
+        0,
+        Math.floor((now - quantityUpdatedAt) / 86400000)
+      );
+
+      const adjustedQuantity =
+        dailyUse > 0
+          ? Math.max(0, quantity - daysPassed * dailyUse)
+          : quantity;
+
+      if (!dailyUse || dailyUse <= 0) continue;
+
+      const daysRemaining = Math.floor(adjustedQuantity / dailyUse);
+
+      if (daysRemaining > lowThresholdDays) continue;
+
+      const ownerUid = item.ownerUid;
+      if (!ownerUid) continue;
+
+      const ownerSnap = await firestore
+        .collection("users")
+        .doc(ownerUid)
+        .get();
+
+      if (!ownerSnap.exists) continue;
+
+      const ownerData = ownerSnap.data();
+      const pushToken = ownerData?.pushToken;
+      if (!pushToken) continue;
+
+      const message = {
+        token: pushToken,
+        notification: {
+          title: "Low Feed Alert",
+          body:
+            adjustedQuantity <= 0
+              ? `${item.itemName || "Feed"} is empty.`
+              : `${item.itemName || "Feed"} may run out in about ${daysRemaining} day(s).`,
+        },
+        data: {
+          type: "low_feed",
+          horseId: item.horseId || "",
+          feedItemId: itemDoc.id,
+        },
+      };
+
+      await admin.messaging(firebaseApp).send(message);
+
+      await itemDoc.ref.update({
+        lowFeedPushSent: true,
+        lowFeedPushSentAt: Date.now(),
+      });
+
+      sentCount += 1;
+    }
+
+    res.json({
+      success: true,
+      sentCount,
+    });
+  } catch (e) {
+    console.log("PROCESS FEED INVENTORY REMINDERS ERROR:", e);
+
+    res.status(500).json({
+      error: e.message,
+    });
+  }
+});
+
 app.get("/test-push", async (req, res) => {
   try {
     const message = {

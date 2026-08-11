@@ -5,7 +5,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   query,
   updateDoc,
@@ -15,10 +14,7 @@ import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
 import { useLocation, useNavigate } from "react-router-dom";
 
-const API_BASE_URL =
-  process.env.NODE_ENV === "development"
-    ? "http://localhost:3000"
-    : "https://lex-equine-api.onrender.com";
+
 const isOffline = () =>
   typeof navigator !== "undefined" && navigator.onLine === false;
 
@@ -245,7 +241,7 @@ const navigate = useNavigate();
       setCareItems(items);
 setCareStatus(items.length ? "" : "No care items yet.");
 
-await checkCareAlerts(items);
+
     } catch (e) {
       console.log("LOAD CARE ERROR:", e);
       setCareItems([]);
@@ -253,76 +249,7 @@ await checkCareAlerts(items);
     }
   };
 
-  const checkCareAlerts = async (items) => {
-  if (!user?.uid || !items?.length) return;
-
-  try {
-    const userSnap = await getDoc(doc(db, "users", user.uid));
-    const userData = userSnap.exists() ? userSnap.data() : null;
-
-    if (!userData?.pushToken) return;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    for (const item of items) {
-      const due = new Date(item.dueDate);
-      due.setHours(0, 0, 0, 0);
-
-      const daysUntil = Math.round(
-        (due.getTime() - today.getTime()) / 86400000
-      );
-
-      let pushTitle = "";
-      let pushBody = "";
-      let updateField = "";
-
-      if (
-        daysUntil >= 0 &&
-        daysUntil <= 3 &&
-        !item.upcomingCarePushSent
-      ) {
-        pushTitle = "Upcoming Care Reminder";
-        pushBody = `${item.title || item.type} is coming up for ${item.horseName}.`;
-        updateField = "upcomingCarePushSent";
-      }
-
-      if (
-        daysUntil < 0 &&
-        !item.overdueCarePushSent
-      ) {
-        pushTitle = "Overdue Care Reminder";
-        pushBody = `${item.title || item.type} is overdue for ${item.horseName}.`;
-        updateField = "overdueCarePushSent";
-      }
-
-      if (!pushTitle) continue;
-
-      await fetch(`${API_BASE_URL}/send-push`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token: userData.pushToken,
-          title: pushTitle,
-          body: pushBody,
-          data: {
-            type: "care_alert",
-            horseId: item.horseId,
-            reminderId: item.id,
-          },
-        }),
-      });
-
-      await updateDoc(doc(db, "reminders", item.id), {
-        [updateField]: true,
-      });
-    }
-  } catch (e) {
-    console.log("CARE ALERT CHECK ERROR:", e);
-  }
-};
+  
 
   useEffect(() => {
     loadCare();
@@ -409,6 +336,9 @@ await checkCareAlerts(items);
     }
 
     const dueDateMs = new Date(`${careDate}T12:00:00`).getTime();
+    const dueDateTimeMs = new Date(
+  `${careDate}T${careTime || "09:00"}:00`
+).getTime();
 
     if (Number.isNaN(dueDateMs)) {
       alert("Please enter a valid date.");
@@ -430,7 +360,7 @@ await checkCareAlerts(items);
       type: careType,
       title: resolvedTitle,
       dueDate: dueDateMs,
-      alertDate: dueDateMs - (ALERT_OFFSETS[alertTiming] ?? 1) * 86400000,
+      alertDate: dueDateTimeMs - (ALERT_OFFSETS[alertTiming] ?? 1) * 86400000,
       time: careTime || "",
       repeatInterval,
       alertTiming,
@@ -448,7 +378,7 @@ completed: false,
 
         await updateDoc(doc(db, "reminders", editingCareId), payload);
       } else {
-  const savedCareRef = await addDoc(collection(db, "reminders"), {
+  await addDoc(collection(db, "reminders"), {
   ...payload,
   upcomingCarePushSent: false,
   overdueCarePushSent: false,
@@ -456,31 +386,7 @@ completed: false,
   createdAt: Date.now(),
 });
 
-  try {
-    const userSnap = await getDoc(doc(db, "users", user.uid));
-    const userData = userSnap.exists() ? userSnap.data() : null;
-
-    if (userData?.pushToken) {
-      await fetch(`${API_BASE_URL}/send-push`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token: userData.pushToken,
-          title: "Care Reminder Scheduled",
-          body: `${resolvedTitle} is scheduled for ${payload.horseName}.`,
-          data: {
-            type: "care_scheduled",
-            horseId: payload.horseId,
-            reminderId: savedCareRef.id,
-          },
-        }),
-      });
-    }
-  } catch (pushErr) {
-    console.log("CARE PUSH ERROR:", pushErr);
-  }
+  
 }
 
       await loadCare();

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { db } from "../firebase";
 import {
   addDoc,
   collection,
-  getDoc,
   getDocs,
   query,
   where,
@@ -13,8 +12,7 @@ import {
 } from "firebase/firestore";
 import BottomNav from "../components/BottomNav";
 import FloatingAskLex from "../components/FloatingAskLex";
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL || "https://lex-equine.onrender.com";
+
 
 const isOffline = () =>
   typeof navigator !== "undefined" && navigator.onLine === false;
@@ -34,6 +32,13 @@ const getCurrentTimeInputValue = () => {
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
+};
+
+const REMINDER_OFFSETS = {
+  none: null,
+  "1day": 1,
+  "2day": 2,
+  "1week": 7,
 };
 
 const getSeasonLabel = (monthIndex) => {
@@ -159,7 +164,7 @@ export default function EventsPage({ user, horses = [], onAsk }) {
     setIsOpen(true);
   };
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     if (!user?.uid) {
       setEvents([]);
       return;
@@ -178,122 +183,15 @@ export default function EventsPage({ user, horses = [], onAsk }) {
       console.log("LOAD EVENTS ERROR:", e);
       setEvents([]);
     }
-  };
-
-  useEffect(() => {
-    loadEvents();
   }, [user?.uid]);
 
-    useEffect(() => {
-    const checkEventAlerts = async () => {
-      if (!user?.uid || events.length === 0) return;
+  useEffect(() => {
+  loadEvents();
+}, [loadEvents]);
 
-      try {
-        const userSnap = await getDoc(doc(db, "users", user.uid));
-        const userData = userSnap.exists() ? userSnap.data() : null;
+    
 
-        if (!userData?.pushToken) return;
-
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-
-        for (const event of events) {
-          if (event.completed || event.eventAlertPushSent) continue;
-
-          const eventDateObj = new Date(event.eventDate || 0);
-          const eventDay = new Date(
-            eventDateObj.getFullYear(),
-            eventDateObj.getMonth(),
-            eventDateObj.getDate()
-          ).getTime();
-
-          const diffDays = Math.round((eventDay - today) / 86400000);
-
-          const shouldSend =
-            diffDays === 0 ||
-            (event.reminder === "1day" && diffDays === 1) ||
-            (event.reminder === "2day" && diffDays === 2) ||
-            (event.reminder === "1week" && diffDays === 7);
-
-          if (!shouldSend) continue;
-
-          const title = diffDays === 0 ? "Event Today" : "Upcoming Event";
-          const dayText =
-            diffDays === 0
-              ? "today"
-              : diffDays === 1
-              ? "tomorrow"
-              : `in ${diffDays} days`;
-
-          await fetch(`${API_BASE_URL}/send-push`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              token: userData.pushToken,
-              title,
-              body: `${event.name || "Your event"} is ${dayText}${
-                event.time ? ` at ${event.time}` : ""
-              }.`,
-              data: {
-                type: "event_alert",
-                eventId: event.id,
-                horseId: event.horseId || "",
-              },
-            }),
-          });
-
-          await updateDoc(doc(db, "events", event.id), {
-            eventAlertPushSent: true,
-            eventAlertPushSentAt: Date.now(),
-            eventAlertPushDay: diffDays,
-          });
-        }
-      } catch (pushErr) {
-        console.log("EVENT ALERT PUSH ERROR:", pushErr);
-      }
-    };
-
-    checkEventAlerts();
-  }, [events, user?.uid]);
-
-    const sendEventScheduledPush = async (savedEvent) => {
-    if (!user?.uid || !savedEvent?.id) return;
-
-    try {
-      const userSnap = await getDoc(doc(db, "users", user.uid));
-      const userData = userSnap.exists() ? userSnap.data() : null;
-
-      if (!userData?.pushToken) return;
-
-      await fetch(`${API_BASE_URL}/send-push`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token: userData.pushToken,
-          title: "Event Scheduled",
-          body: `${savedEvent.name || "Your event"} is scheduled for ${formatEventDate(
-            savedEvent.eventDate
-          )}${savedEvent.time ? ` at ${savedEvent.time}` : ""}.`,
-          data: {
-            type: "event_scheduled",
-            eventId: savedEvent.id,
-            horseId: savedEvent.horseId || "",
-          },
-        }),
-      });
-
-      await updateDoc(doc(db, "events", savedEvent.id), {
-        eventPushSent: true,
-        eventScheduledPushSentAt: Date.now(),
-      });
-    } catch (pushErr) {
-      console.log("EVENT SCHEDULED PUSH ERROR:", pushErr);
-    }
-  };
+    
 
   const saveEvent = async () => {
     if (!user?.uid) {
@@ -324,6 +222,17 @@ export default function EventsPage({ user, horses = [], onAsk }) {
 
       const eventDateMs = new Date(`${eventDate}T12:00:00`).getTime();
 
+      const eventDateTimeMs = new Date(
+  `${eventDate}T${eventTime || "09:00"}:00`
+).getTime();
+
+const reminderDays = REMINDER_OFFSETS[eventReminder];
+
+const reminderAt =
+  reminderDays == null
+    ? null
+    : eventDateTimeMs - reminderDays * 86400000;
+
             const payload = {
         ownerUid: user.uid,
         horseId: eventHorseId === "shared" ? null : eventHorseId,
@@ -334,36 +243,29 @@ export default function EventsPage({ user, horses = [], onAsk }) {
         notes: eventNotes.trim(),
         eventDate: Number.isNaN(eventDateMs) ? Date.now() : eventDateMs,
         time: eventTime || "",
-        reminder: eventReminder,
+reminder: eventReminder,
+reminderAt,
       };
 
       if (mode === "add") {
-        payload.completed = false;
-        payload.eventPushSent = false;
-        payload.eventScheduledPushSentAt = null;
-        payload.eventAlertPushSent = false;
-        payload.eventAlertPushSentAt = null;
-        payload.eventAlertPushDay = null;
-      }
+  payload.completed = false;
+  payload.eventAlertPushSent = false;
+  payload.eventAlertPushSentAt = null;
+}
 
             if (mode === "add") {
-        const newEventRef = await addDoc(collection(db, "events"), {
-          ...payload,
-          createdAt: Date.now(),
-        });
+  await addDoc(collection(db, "events"), {
+    ...payload,
+    createdAt: Date.now(),
+  });
+} else {
+  if (!editingEventId) {
+    alert("No event selected to edit.");
+    return;
+  }
 
-        await sendEventScheduledPush({
-          id: newEventRef.id,
-          ...payload,
-        });
-      } else {
-        if (!editingEventId) {
-          alert("No event selected to edit.");
-          return;
-        }
-
-        await updateDoc(doc(db, "events", editingEventId), payload);
-      }
+  await updateDoc(doc(db, "events", editingEventId), payload);
+}
 
       await loadEvents();
       closeModal();

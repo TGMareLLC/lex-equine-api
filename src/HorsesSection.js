@@ -1441,6 +1441,7 @@ lowThresholdDays: Number.isNaN(lowThresholdNumber)
 estimatedDaysRemaining,
 estimatedDepletionDate,
 quantityUpdatedAt: Date.now(),
+lowFeedPushSent: false,
 refillQuantity: feedItemType === "Hay" ? null : quantityNumber,
 notes: feedNotes.trim(),
 createdAt: Date.now(),
@@ -1448,52 +1449,7 @@ updatedAt: Date.now(),
     });
   }
 
-  const isLowInventory =
-  estimatedDaysRemaining != null &&
-  estimatedDaysRemaining <=
-    (Number.isNaN(lowThresholdNumber)
-      ? 3
-      : lowThresholdNumber);
-
-  const existingFeedItem = editingFeedItemId
-  ? feedInventoryItems.find((item) => item.id === editingFeedItemId)
-  : null;
-
-const shouldSendLowFeedPush =
-  isLowInventory && !existingFeedItem?.lowFeedPushSent;
-
-if (shouldSendLowFeedPush) {
-  try {
-    const userSnap = await getDoc(doc(db, "users", user.uid));
-const userData = userSnap.exists() ? userSnap.data() : null;
-
-    if (userData?.pushToken) {
-      await fetch(`${API_BASE_URL}/send-push`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          token: userData.pushToken,
-          title: "Low Feed Alert",
-          body: `${feedItemName} may run out in about ${estimatedDaysRemaining} day(s).`,
-          data: {
-            type: "low_feed",
-            horseId: feedInventoryHorse.id,
-          },
-        }),
-      });
-      if (editingFeedItemId) {
-  await updateDoc(doc(db, "feed_inventory", editingFeedItemId), {
-    lowFeedPushSent: true,
-    lowFeedPushSentAt: Date.now(),
-  });
-}
-    }
-  } catch (pushErr) {
-    console.log("LOW FEED PUSH ERROR:", pushErr);
-  }
-}
+  
 
     alert("Feed item saved.");
     await loadFeedInventory(feedInventoryHorse.id);

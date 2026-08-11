@@ -633,6 +633,76 @@ app.get("/process-event-reminders", async (req, res) => {
   }
 });
 
+app.get("/process-care-reminders", async (req, res) => {
+  try {
+    const now = Date.now();
+
+    const snap = await firestore
+      .collection("reminders")
+      .where("upcomingCarePushSent", "==", false)
+      .where("completed", "==", false)
+      .get();
+
+    let sentCount = 0;
+
+    for (const reminderDoc of snap.docs) {
+      const reminder = reminderDoc.data();
+
+      if (!reminder.alertDate) continue;
+      if (reminder.alertDate > now) continue;
+
+      const ownerUid = reminder.ownerUid;
+      if (!ownerUid) continue;
+
+      const ownerSnap = await firestore
+        .collection("users")
+        .doc(ownerUid)
+        .get();
+
+      if (!ownerSnap.exists) continue;
+
+      const ownerData = ownerSnap.data();
+      const pushToken = ownerData?.pushToken;
+      if (!pushToken) continue;
+
+      const message = {
+        token: pushToken,
+        notification: {
+          title: "Upcoming Care Reminder",
+          body: `${reminder.title || reminder.type || "Care item"} is coming up for ${
+            reminder.horseName || "your horse"
+          }${reminder.time ? ` at ${reminder.time}` : ""}.`,
+        },
+        data: {
+          type: "care_alert",
+          reminderId: reminderDoc.id,
+          horseId: reminder.horseId || "",
+        },
+      };
+
+      await admin.messaging(firebaseApp).send(message);
+
+      await reminderDoc.ref.update({
+        upcomingCarePushSent: true,
+        upcomingCarePushSentAt: Date.now(),
+      });
+
+      sentCount += 1;
+    }
+
+    res.json({
+      success: true,
+      sentCount,
+    });
+  } catch (e) {
+    console.log("PROCESS CARE REMINDERS ERROR:", e);
+
+    res.status(500).json({
+      error: e.message,
+    });
+  }
+});
+
 app.get("/test-push", async (req, res) => {
   try {
     const message = {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAccess } from "../context/AccessContext";
 import {
   House,
   DollarSign,
@@ -48,6 +49,7 @@ function HorseIcon() {
 
 export default function BottomNav() {
   const navigate = useNavigate();
+  const { isCaretakerOnly } = useAccess();
   const location = useLocation();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
@@ -62,20 +64,28 @@ export default function BottomNav() {
     return currentPath.startsWith(path);
   };
 
-  const mainItems = [
-    { label: "Home", path: "/", icon: House, custom: false },
-    { label: "Horses", path: "/horses", icon: HorseIcon, custom: true },
-    { label: "Care", path: "/care", icon: Clock, custom: false },
-    { label: "Costs", path: "/costs", icon: DollarSign, custom: false },
-    { label: "Docs", path: "/documents", icon: FileText, custom: false },
-  ];
+  const mainItems = isCaretakerOnly
+  ? [
+      { label: "Home", path: "/", icon: House, custom: false },
+    ]
+  : [
+      { label: "Home", path: "/", icon: House, custom: false },
+      { label: "Horses", path: "/horses", icon: HorseIcon, custom: true },
+      { label: "Care", path: "/care", icon: Clock, custom: false },
+      { label: "Costs", path: "/costs", icon: DollarSign, custom: false },
+      { label: "Docs", path: "/documents", icon: FileText, custom: false },
+    ];
 
-  const moreItems = [
-  { label: "Events", path: "/events", icon: CalendarRange },
-  { label: "Resources", path: "/resources", icon: Compass },
-  { label: "Caretakers", path: "/caretakers", icon: Users },
-  { label: "Sick Watch", path: "/sick-watch", icon: Activity },
-];
+  const moreItems = isCaretakerOnly
+  ? [
+      { label: "Caretakers", path: "/caretakers", icon: Users },
+    ]
+  : [
+      { label: "Events", path: "/events", icon: CalendarRange },
+      { label: "Resources", path: "/resources", icon: Compass },
+      { label: "Caretakers", path: "/caretakers", icon: Users },
+      { label: "Sick Watch", path: "/sick-watch", icon: Activity },
+    ];
 
   const isMoreActive = moreItems.some((item) => isActive(item.path));
 
@@ -165,7 +175,9 @@ export default function BottomNav() {
             borderTop: `1px solid ${border}`,
             boxShadow: "0 -4px 14px rgba(0,0,0,0.04)",
             display: "grid",
-            gridTemplateColumns: "repeat(6, 1fr)",
+            gridTemplateColumns: isCaretakerOnly
+  ? "repeat(2, 1fr)"
+  : "repeat(6, 1fr)",
             paddingTop: 8,
             paddingBottom: "max(env(safe-area-inset-bottom), 20px)",
             paddingLeft: 4,

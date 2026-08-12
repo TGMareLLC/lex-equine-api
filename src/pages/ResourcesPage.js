@@ -263,11 +263,34 @@ export default function ResourcesPage({ onAsk }) {
         return;
       }
 
+      console.log(
+  "ASSIGN RESOURCE JSON:",
+  JSON.stringify(assignResource)
+);
+
       for (const horseId of selectedHorseIds) {
-        await updateDoc(doc(db, "horses", horseId), {
-          [field]: assignResource.id,
-        });
-      }
+  const contactField =
+    field === "vetId"
+      ? "vet"
+      : field === "farrierId"
+      ? "farrier"
+      : field === "trainerId"
+      ? "trainer"
+      : "dentist";
+
+  await updateDoc(doc(db, "horses", horseId), {
+    [field]: assignResource.id,
+
+    [contactField]: {
+      name: assignResource.name || "",
+      businessName: assignResource.name || "",
+      phone: assignResource.phone || "",
+      address: assignResource.address || "",
+      email: assignResource.email || "",
+      notes: "",
+    },
+  });
+}
 
       setIsAssignOpen(false);
       setAssignResource(null);

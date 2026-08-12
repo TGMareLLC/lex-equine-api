@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
-import { Clock, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import { db, auth } from "../firebase";
 import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import lexHorseIcon from "../assets/lex-horse-icon.png";
@@ -12,126 +12,9 @@ const API_BASE_URL =
     ? "http://localhost:3000"
     : "https://lex-equine-api.onrender.com";
 
-function AskLexIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <path
-        d="M8 10.5C8 8.6 9.6 7 11.5 7H20.5C22.4 7 24 8.6 24 10.5V16.5C24 18.4 22.4 20 20.5 20H15.2L11.2 23.5V20H11.5C9.6 20 8 18.4 8 16.5V10.5Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M12 12.8H20" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M12 16H17.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  );
-}
 
-function SickWatchIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 30 30" fill="none" aria-hidden="true">
-      <path
-        d="M15 8V22M8 15H22"
-        stroke="currentColor"
-        strokeWidth="2.1"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
-function HorsesIcon() {
-  return (
-    <img
-      src={lexHorseIcon}
-      alt="Horses"
-      style={{
-        width: 32,
-        height: 32,
-        objectFit: "contain",
-        display: "block",
-      }}
-    />
-  );
-}
 
-function CareIcon() {
-  return <Clock size={30} strokeWidth={1.9} />;
-}
-
-function CostsIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <circle cx="16" cy="16" r="10" stroke="currentColor" strokeWidth="1.9" />
-      <path d="M16 10.5V21.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path
-        d="M19 12.8C18.4 12 17.3 11.5 16 11.5C14.1 11.5 12.7 12.5 12.7 14C12.7 15.4 13.8 16 16 16.5C18.2 17 19.3 17.6 19.3 19C19.3 20.5 17.9 21.5 16 21.5C14.7 21.5 13.5 21 12.8 20.2"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function EventsIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <rect
-        x="6"
-        y="7"
-        width="20"
-        height="19"
-        rx="3"
-        stroke="currentColor"
-        strokeWidth="1.9"
-      />
-      <path d="M10 5.5V9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M22 5.5V9" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M6 12.5H26" stroke="currentColor" strokeWidth="1.9" />
-      <circle cx="12" cy="17.5" r="1.4" fill="currentColor" />
-      <circle cx="16" cy="17.5" r="1.4" fill="currentColor" />
-      <circle cx="20" cy="17.5" r="1.4" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ResourcesIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <path
-        d="M16 26C16 26 23 19.4 23 14.2C23 10.6 19.9 7.7 16 7.7C12.1 7.7 9 10.6 9 14.2C9 19.4 16 26 16 26Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinejoin="round"
-      />
-      <circle cx="16" cy="14.2" r="2.8" stroke="currentColor" strokeWidth="1.9" />
-    </svg>
-  );
-}
-
-function DocumentsIcon() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <path
-        d="M11 6.5H18L23 11.5V24.5C23 25.6 22.1 26.5 21 26.5H11C9.9 26.5 9 25.6 9 24.5V8.5C9 7.4 9.9 6.5 11 6.5Z"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M18 6.5V11.5H23"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinejoin="round"
-      />
-      <path d="M12.5 16H19.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-      <path d="M12.5 20H19.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 const getDaysUntil = (value) => {
   if (!value) return null;
@@ -145,9 +28,7 @@ const getDaysUntil = (value) => {
   return Math.round((dueDay - today) / 86400000);
 };
 
-const getHorseId = (item) => {
-  return item?.horseId || item?.selectedHorseId || item?.horse?.id || null;
-};
+
 const formatShortDate = (value) => {
   if (!value) return "";
 
@@ -341,6 +222,7 @@ export default function HomePage({
   horses = [],
   careHorses = [],
   careHorsesStatus = "",
+  isCaretakerOnly = false,
   onAsk,
 }) {
   const navigate = useNavigate();
@@ -368,13 +250,10 @@ const [isWeatherModalOpen, setIsWeatherModalOpen] = useState(false);
   const cardBg = "#FFFFFF";
   const borderColor = "#E5E2DA";
   const navy = "#24324A";
-  const navyPressed = "#1B2538";
   const navyBorder = "#31425F";
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
   const burgundy = "#7A2E2E";
-  const upcomingGoldText = "#6E5A36";
-  const upcomingGoldBg = "#F5EEDB";
 
   const currentTemp = Math.round(weatherData?.current?.temp || 0);
 
@@ -401,7 +280,7 @@ const todayHourlyWeather = (weatherData?.hourly || []).slice(0, 24);
 
   useEffect(() => {
     const loadHomeData = async () => {
-      if (!user?.uid) {
+          if (!user?.uid || isCaretakerOnly) {
   setActiveReminders([]);
   setActiveEvents([]);
   setFeedInventoryItems([]);
@@ -462,7 +341,7 @@ setHomeDataStatus("Could not load homepage data.");
     };
 
     loadHomeData();
-  }, [user]);
+  }, [user, isCaretakerOnly]);
 
   const loadWeather = async (coords) => {
   const apiKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
@@ -635,70 +514,7 @@ loadWeather(coords);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
-  const urgentCards = useMemo(() => {
-    const grouped = {};
-    const now = Date.now();
-    const threeDaysFromNow = now + 3 * 24 * 60 * 60 * 1000;
-
-    (horses || []).forEach((horse) => {
-      if (!horse?.id) return;
-
-      grouped[horse.id] = {
-        horse,
-        sickWatch: horse.sickWatchOn ? horse : null,
-        reminder: null,
-        event: null,
-      };
-    });
-
-    activeReminders.forEach((item) => {
-      const horseId = getHorseId(item);
-      if (!horseId) return;
-
-      const due = item?.dueDate || 0;
-      if (due < now || due > threeDaysFromNow) return;
-
-      if (!grouped[horseId]) {
-        grouped[horseId] = {
-          horse: { id: horseId, name: item.horseName || "Unnamed" },
-          sickWatch: null,
-          reminder: null,
-          event: null,
-        };
-      }
-
-      const existing = grouped[horseId].reminder;
-      if (!existing || due < (existing.dueDate || 0)) {
-        grouped[horseId].reminder = item;
-      }
-    });
-
-    activeEvents.forEach((event) => {
-      const horseId = getHorseId(event);
-      if (!horseId) return;
-
-      const days = getDaysUntil(event.eventDate);
-      if (days !== 3) return;
-
-      if (!grouped[horseId]) {
-        grouped[horseId] = {
-          horse: { id: horseId, name: event.horseName || "Unnamed" },
-          sickWatch: null,
-          reminder: null,
-          event: null,
-        };
-      }
-
-      const existing = grouped[horseId].event;
-      if (!existing || (event.eventDate || 0) < (existing.eventDate || 0)) {
-        grouped[horseId].event = event;
-      }
-    });
-
-    return Object.values(grouped)
-      .filter((item) => item.sickWatch || item.reminder || item.event)
-      .sort((a, b) => (a.horse?.name || "").localeCompare(b.horse?.name || ""));
-  }, [horses, activeReminders, activeEvents]);
+  
 
   const upcomingTasks = useMemo(() => {
   const reminderTasks = activeReminders.map((item) => ({
@@ -974,83 +790,7 @@ navigate(`/sick-watch?horseId=${horse.id}`, {
     window.open("https://lexequine.com/#privacy", "_blank");
   };
 
-  const tileBaseStyle = {
-    minHeight: 154,
-    borderRadius: 24,
-    border: `1px solid ${navyBorder}`,
-    background: navy,
-    color: "#FFFFFF",
-    boxShadow: "0 12px 24px rgba(24, 34, 51, 0.14)",
-    padding: 20,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    textAlign: "left",
-    cursor: "pointer",
-    position: "relative",
-    overflow: "hidden",
-  };
-
-  const tiles = [
-    {
-      key: "horses",
-      title: "Horses",
-      subtitle: "Profiles",
-      icon: <HorsesIcon />,
-      onClick: () => navigate("/horses"),
-      featured: false,
-    },
-    {
-      key: "sickwatch",
-      title: "Sick Watch",
-      subtitle: "Monitoring",
-      icon: <SickWatchIcon />,
-      onClick: () => navigate("/sick-watch"),
-      featured: false,
-    },
-    {
-      key: "care",
-      title: "Care",
-      subtitle: "Schedule",
-      icon: <CareIcon />,
-      onClick: () => navigate("/care"),
-      featured: false,
-    },
-    {
-      key: "costs",
-      title: "Costs",
-      subtitle: "Tracking",
-      icon: <CostsIcon />,
-      onClick: () => navigate("/costs"),
-      featured: false,
-    },
-    {
-      key: "events",
-      title: "Events",
-      subtitle: "Competitions",
-      icon: <EventsIcon />,
-      onClick: () => navigate("/events"),
-      featured: false,
-    },
-    {
-      key: "resources",
-      title: "Resources",
-      subtitle: "Nearby help",
-      icon: <ResourcesIcon />,
-      onClick: () => navigate("/resources"),
-      featured: false,
-    },
-    {
-      key: "documents",
-      title: "Documents",
-      subtitle: "Paperwork",
-      icon: <DocumentsIcon />,
-      onClick: () => navigate("/documents"),
-      featured: false,
-    },
   
-  ];
 
   return (
   <div
@@ -1148,7 +888,7 @@ navigate(`/sick-watch?horseId=${horse.id}`, {
   style={{
     marginTop: 22,
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: isCaretakerOnly ? "1fr" : "1fr 1fr",
     gap: 12,
     alignItems: "stretch",
   }}
@@ -1281,7 +1021,7 @@ navigate(`/sick-watch?horseId=${horse.id}`, {
 >
   Rain {rainChance}%
   {rainTime ? ` around ${rainTime}` : ""}
-</div>
+      </div>
       </>
     ) : (
       <div style={{ fontSize: 14, color: secondaryText }}>
@@ -1290,80 +1030,82 @@ navigate(`/sick-watch?horseId=${horse.id}`, {
     )}
   </div>
 
-  <div
-    style={{
-      background: cardBg,
-      border: `1px solid ${borderColor}`,
-      borderRadius: 20,
-      padding: 14,
-      boxShadow: "0 6px 14px rgba(0,0,0,0.04)",
-    }}
-  >
+  {!isCaretakerOnly ? (
     <div
       style={{
-        fontSize: 18,
-        fontWeight: 700,
-        color: primaryText,
-        marginBottom: 12,
+        background: cardBg,
+        border: `1px solid ${borderColor}`,
+        borderRadius: 20,
+        padding: 14,
+        boxShadow: "0 6px 14px rgba(0,0,0,0.04)",
       }}
     >
-      Upcoming
+      <div
+        style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: primaryText,
+          marginBottom: 12,
+        }}
+      >
+        Upcoming
+      </div>
+
+      {homeDataStatus ? (
+        <div style={{ fontSize: 14, color: burgundy }}>
+          {homeDataStatus}
+        </div>
+      ) : upcomingTasks.length === 0 ? (
+        <div style={{ fontSize: 14, color: secondaryText }}>
+          No upcoming tasks right now.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {upcomingTasks.map((task) => (
+            <div
+              key={`${task.type}-${task.id}`}
+              onClick={() =>
+                navigate(task.type === "event" ? "/events" : "/care")
+              }
+              style={{
+                border: `1px solid ${borderColor}`,
+                borderRadius: 14,
+                padding: "10px 12px",
+                background: "#FBF8F2",
+                cursor: "pointer",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: primaryText,
+                  lineHeight: 1.25,
+                }}
+              >
+                {task.title}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 13,
+                  color: secondaryText,
+                  lineHeight: 1.35,
+                }}
+              >
+                {task.horseName} · {formatShortDate(task.date)}
+                {task.time ? ` ${formatTaskTime(task.time)}` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
-
-    {homeDataStatus ? (
-      <div style={{ fontSize: 14, color: burgundy }}>
-        {homeDataStatus}
-      </div>
-    ) : upcomingTasks.length === 0 ? (
-      <div style={{ fontSize: 14, color: secondaryText }}>
-        No upcoming tasks right now.
-      </div>
-    ) : (
-      <div style={{ display: "grid", gap: 10 }}>
-        {upcomingTasks.map((task) => (
-          <div
-            key={`${task.type}-${task.id}`}
-            onClick={() =>
-              navigate(task.type === "event" ? "/events" : "/care")
-            }
-            style={{
-              border: `1px solid ${borderColor}`,
-              borderRadius: 14,
-              padding: "10px 12px",
-              background: "#FBF8F2",
-              cursor: "pointer",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: primaryText,
-                lineHeight: 1.25,
-              }}
-            >
-              {task.title}
-            </div>
-
-            <div
-              style={{
-                marginTop: 4,
-                fontSize: 13,
-                color: secondaryText,
-                lineHeight: 1.35,
-              }}
-            >
-              {task.horseName} · {formatShortDate(task.date)}
-              {task.time ? ` ${formatTaskTime(task.time)}` : ""}
-            </div>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
+  ) : null}
 </div>
 
-{urgentAlerts.length > 0 ? (
+{!isCaretakerOnly && urgentAlerts.length > 0 ? (
   <div
     style={{
       marginTop: 14,
@@ -1424,134 +1166,153 @@ navigate(`/sick-watch?horseId=${horse.id}`, {
   </div>
 ) : null}
 
-<div
-  style={{
-    marginTop: 14,
-    background: cardBg,
-    border: `1px solid ${borderColor}`,
-    borderRadius: 22,
-    padding: 16,
-    boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-  }}
->
+{!isCaretakerOnly ? (
   <div
     style={{
-      fontSize: 18,
-      fontWeight: 700,
-      color: primaryText,
-      marginBottom: 12,
+      marginTop: 14,
+      background: cardBg,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 22,
+      padding: 16,
+      boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
     }}
   >
-    My Horses
-  </div>
-
-  <div style={{ display: "grid", gap: 12 }}>
-    {horses.map((horse) => (
-      <div
-  key={horse.id}
-  onClick={() => navigate("/horses")}
-  style={{
-  border: `1px solid ${navyBorder}`,
-  borderRadius: 16,
-  padding: 14,
-  background: navy,
-  boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-}}
-      >
-        <div
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  }}
->
-  <div>
     <div
       style={{
-        fontSize: 20,
+        fontSize: 18,
         fontWeight: 700,
-        color: "#FFFFFF",
+        color: primaryText,
+        marginBottom: 12,
       }}
     >
-      {horse.name || "Unnamed"}
+      My Horses
     </div>
 
-    <div
-      style={{
-        marginTop: 4,
-        fontSize: 14,
-        color: "rgba(255,255,255,0.82)",
-      }}
-    >
-      {horse.age ? `${horse.age} yrs` : ""}
-      {horse.sex ? ` • ${horse.sex}` : ""}
+    <div style={{ display: "grid", gap: 12 }}>
+      {horses.map((horse) => (
+        <div
+          key={horse.id}
+          onClick={() => navigate("/horses")}
+          style={{
+            border: `1px solid ${navyBorder}`,
+            borderRadius: 16,
+            padding: 14,
+            background: navy,
+            boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: "#FFFFFF",
+                }}
+              >
+                {horse.name || "Unnamed"}
+              </div>
+
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 14,
+                  color: "rgba(255,255,255,0.82)",
+                }}
+              >
+                {horse.age ? `${horse.age} yrs` : ""}
+                {horse.sex ? ` • ${horse.sex}` : ""}
+              </div>
+            </div>
+
+            {horse.photoUrl ? (
+              <img
+                src={horse.photoUrl}
+                alt={horse.name}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  border: "2px solid rgba(255,255,255,0.8)",
+                }}
+              />
+            ) : null}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 8,
+              marginTop: 14,
+            }}
+          >
+            {[
+              {
+                label: "Log",
+                route: `/horses?horseId=${horse.id}&openLog=true`,
+              },
+              {
+                label: "Care",
+                route: `/care?horseId=${horse.id}`,
+              },
+              {
+                label: "Costs",
+                route: `/costs?horseId=${horse.id}`,
+              },
+              {
+                label: "Feed",
+                route: `/horses?horseId=${horse.id}&openFeedInventory=true`,
+              },
+              {
+                label: "Docs",
+                route: `/documents?horseId=${horse.id}`,
+              },
+              {
+                label: "Sick Watch",
+                action: () => startOrOpenSickWatch(horse),
+              },
+            ].map((item) => (
+              <button
+                key={item.label}
+                onClick={(e) => {
+                  e.stopPropagation();
+
+                  if (item.action) {
+                    item.action();
+                    return;
+                  }
+
+                  navigate(item.route);
+                }}
+                style={{
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  borderRadius: 12,
+                  padding: "10px 6px",
+                  background: "rgba(255,255,255,0.12)",
+                  color: "#FFFFFF",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   </div>
-
-  {horse.photoUrl ? (
-    <img
-      src={horse.photoUrl}
-      alt={horse.name}
-      style={{
-        width: 64,
-        height: 64,
-        borderRadius: "50%",
-        objectFit: "cover",
-        border: "2px solid rgba(255,255,255,0.8)",
-      }}
-    />
-  ) : null}
-</div>
-
-<div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: 8,
-    marginTop: 14,
-  }}
->
-  {[
-  { label: "Log", route: `/horses?horseId=${horse.id}&openLog=true` },
-  { label: "Care", route: `/care?horseId=${horse.id}` },
-  { label: "Costs", route: `/costs?horseId=${horse.id}` },
-  { label: "Feed", route: `/horses?horseId=${horse.id}&openFeedInventory=true` },
-  { label: "Docs", route: `/documents?horseId=${horse.id}` },
-  { label: "Sick Watch", action: () => startOrOpenSickWatch(horse) },
-].map((item) => (
-    <button
-      key={item.label}
-onClick={(e) => {
-  e.stopPropagation();
-
-  if (item.action) {
-    item.action();
-    return;
-  }
-
-  navigate(item.route);
-}}
-      style={{
-        border: "1px solid rgba(255,255,255,0.35)",
-        borderRadius: 12,
-        padding: "10px 6px",
-        background: "rgba(255,255,255,0.12)",
-        color: "#FFFFFF",
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: "pointer",
-      }}
-    >
-      {item.label}
-    </button>
-  ))}
-</div>
-
-      </div>
-    ))}
-  </div>
-</div>
+) : null}
 
 {careHorses.length > 0 || careHorsesStatus ? (
   <div
@@ -1584,12 +1345,16 @@ onClick={(e) => {
         {careHorses.map((horse) => (
   <div
     key={horse.id}
+    onClick={() =>
+  navigate(`/horses?horseId=${horse.id}&openView=true`)
+}
     style={{
-      border: `1px solid ${borderColor}`,
+      border: `1px solid ${navyBorder}`,
       borderRadius: 16,
       padding: 14,
-      background: "#FBF8F2",
-      boxShadow: "0 8px 18px rgba(0,0,0,0.04)",
+      background: navy,
+      boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
+      cursor: "pointer",
     }}
   >
     <div
@@ -1605,7 +1370,7 @@ onClick={(e) => {
           style={{
             fontSize: 20,
             fontWeight: 700,
-            color: primaryText,
+            color: "#FFFFFF",
           }}
         >
           {horse.name || "Unnamed"}
@@ -1615,7 +1380,7 @@ onClick={(e) => {
           style={{
             marginTop: 4,
             fontSize: 14,
-            color: secondaryText,
+            color: "rgba(255,255,255,0.82)",
           }}
         >
           {horse.age ? `${horse.age} yrs` : ""}
@@ -1632,29 +1397,58 @@ onClick={(e) => {
             height: 64,
             borderRadius: "50%",
             objectFit: "cover",
-            border: `2px solid ${borderColor}`,
+            border: "2px solid rgba(255,255,255,0.8)",
           }}
         />
       ) : null}
     </div>
 
-    <button
-  onClick={() => navigate(`/daily-care/${horse.id}?mode=caretaker`)}
-  style={{
-    width: "100%",
-    marginTop: 14,
-    border: `1px solid ${borderColor}`,
-    borderRadius: 14,
-    padding: "12px",
-    background: "#FFFFFF",
-    color: primaryText,
-    fontWeight: 700,
-    fontSize: 15,
-    cursor: "pointer",
-  }}
->
-  Today's Care
-</button>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 8,
+        marginTop: 14,
+      }}
+    >
+      <button
+        onClick={(e) => {
+  e.stopPropagation();
+  navigate(`/horses?horseId=${horse.id}&openView=true`);
+}}
+        style={{
+          border: "1px solid rgba(255,255,255,0.35)",
+          borderRadius: 12,
+          padding: "10px 6px",
+          background: "rgba(255,255,255,0.12)",
+          color: "#FFFFFF",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        View Horse
+      </button>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          navigate(`/daily-care/${horse.id}?mode=caretaker`);
+        }}
+        style={{
+          border: "1px solid rgba(255,255,255,0.35)",
+          borderRadius: 12,
+          padding: "10px 6px",
+          background: "rgba(255,255,255,0.12)",
+          color: "#FFFFFF",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        Today&apos;s Care
+      </button>
+    </div>
   </div>
 ))}
       </div>

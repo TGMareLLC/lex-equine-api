@@ -11,16 +11,18 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-export default function CaretakerDetailPage({ user, horses = [] }) {
+export default function CaretakerDetailPage({
+  user,
+  horses = [],
+  onCaretakerAccessChanged,
+}) {
   const navigate = useNavigate();
   const { caretakerId } = useParams();
 
   const [caretaker, setCaretaker] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [editEmail, setEditEmail] = useState("");
   const [editHorseIds, setEditHorseIds] = useState([]);
-  const [editPermissions, setEditPermissions] = useState({});
 
   useEffect(() => {
     if (!caretakerId) {
@@ -52,15 +54,8 @@ export default function CaretakerDetailPage({ user, horses = [] }) {
   }, [caretakerId]);
 
   const startEditing = () => {
-    setEditEmail(caretaker.caretakerEmail || "");
     setEditHorseIds(caretaker.horseIds || []);
-    setEditPermissions({
-      viewHorse: caretaker.permissions?.viewHorse ?? true,
-      completeCare: caretaker.permissions?.completeCare ?? true,
-      addLogs: caretaker.permissions?.addLogs ?? true,
-      viewEmergencyContacts:
-        caretaker.permissions?.viewEmergencyContacts ?? true,
-    });
+    
     setIsEditing(true);
   };
 
@@ -72,20 +67,11 @@ export default function CaretakerDetailPage({ user, horses = [] }) {
     );
   };
 
-  const toggleEditPermission = (key) => {
-    setEditPermissions((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
-  };
+
 
   const handleSaveChanges = async () => {
     if (!caretaker?.id) return;
 
-    if (!editEmail.trim()) {
-      alert("Please enter an email address.");
-      return;
-    }
 
     if (editHorseIds.length === 0) {
       alert("Please assign at least one horse.");
@@ -94,10 +80,8 @@ export default function CaretakerDetailPage({ user, horses = [] }) {
 
     try {
       await updateDoc(doc(db, "caretakerAccess", caretaker.id), {
-        caretakerEmail: editEmail.trim().toLowerCase(),
-        horseIds: editHorseIds,
-        permissions: editPermissions,
-      });
+  horseIds: editHorseIds,
+});
 
       setIsEditing(false);
     } catch (error) {
@@ -121,6 +105,10 @@ export default function CaretakerDetailPage({ user, horses = [] }) {
       revokedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    if (typeof onCaretakerAccessChanged === "function") {
+      await onCaretakerAccessChanged();
+    }
   } catch (error) {
     console.log("REMOVE CARETAKER ACCESS ERROR:", error);
     alert("Could not remove caretaker access.");
@@ -136,6 +124,10 @@ const handleRestoreAccess = async () => {
       revokedAt: null,
       updatedAt: serverTimestamp(),
     });
+
+    if (typeof onCaretakerAccessChanged === "function") {
+      await onCaretakerAccessChanged();
+    }
   } catch (error) {
     console.log("RESTORE CARETAKER ACCESS ERROR:", error);
     alert("Could not restore caretaker access.");
@@ -153,6 +145,11 @@ const handleDeleteCaretaker = async () => {
 
   try {
     await deleteDoc(doc(db, "caretakerAccess", caretaker.id));
+
+    if (typeof onCaretakerAccessChanged === "function") {
+      await onCaretakerAccessChanged();
+    }
+
     navigate("/caretakers");
   } catch (error) {
     console.log("DELETE CARETAKER ERROR:", error);
@@ -160,12 +157,7 @@ const handleDeleteCaretaker = async () => {
   }
 };
 
-  const permissionRows = [
-    ["viewHorse", "View Horse Information"],
-    ["completeCare", "Complete Care Tasks"],
-    ["addLogs", "Add Logs"],
-    ["viewEmergencyContacts", "View Emergency Contacts"],
-  ];
+  
   const inviteCode = caretaker?.inviteCode || caretaker?.id || "";
 
   return (
@@ -223,34 +215,6 @@ const handleDeleteCaretaker = async () => {
                 {caretaker.caretakerName || "Unnamed Caretaker"}
               </div>
 
-              {isEditing ? (
-                <input
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  placeholder="Email Address"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "14px 16px",
-                    borderRadius: 14,
-                    border: "1px solid #E5E2DA",
-                    fontSize: 16,
-                    marginBottom: 16,
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    color: "#6F6A60",
-                    fontSize: 15,
-                    marginBottom: 16,
-                  }}
-                >
-                  {caretaker.caretakerEmail || "No email"}
-                </div>
-              )}
-
               <div
                 style={{
                   border: "1px solid #E5E2DA",
@@ -290,6 +254,18 @@ const handleDeleteCaretaker = async () => {
     >
       Invite Code
     </div>
+    <div
+  style={{
+    color: "#6F6A60",
+    fontSize: 14,
+    lineHeight: 1.5,
+    marginBottom: 12,
+  }}
+>
+  Share this code with your caretaker. Have them download Lex Equine,
+  create or sign into their account, choose “I’m caring for someone
+  else’s horses,” and enter this code to connect.
+</div>
 
     <div
       style={{
@@ -325,6 +301,16 @@ const handleDeleteCaretaker = async () => {
     >
       Copy Invite Code
     </button>
+    <div
+  style={{
+    color: "#6F6A60",
+    fontSize: 13,
+    lineHeight: 1.5,
+    marginTop: 10,
+  }}
+>
+  Once they enter the code, their assigned horse(s) will appear automatically.
+</div>
   </div>
 )}
 
@@ -407,72 +393,7 @@ gap: 12,
                 )}
               </div>
 
-              <div
-                style={{
-                  marginTop: 20,
-                  marginBottom: 10,
-                  color: "#24324A",
-                  fontWeight: 700,
-                  fontSize: 16,
-                }}
-              >
-                Permissions
-              </div>
-
-              <div
-                style={{
-                  border: "1px solid #E5E2DA",
-                  borderRadius: 16,
-                  padding: 12,
-                  background: "#FBF8F2",
-                }}
-              >
-                {permissionRows.map(([key, label]) => {
-                  const checked = isEditing
-                    ? editPermissions[key]
-                    : caretaker.permissions?.[key];
-
-                  return (
-                    <button
-                      key={key}
-                      disabled={!isEditing}
-                      onClick={() => {
-                        if (isEditing) toggleEditPermission(key);
-                      }}
-                      style={{
-                        padding: "12px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "flex-start",
-gap: 12,
-                        color: "#24324A",
-                        fontWeight: 600,
-                        fontSize: 15,
-                        width: "100%",
-                        border: "none",
-                        background:
-                          isEditing && checked ? "#F6F4EE" : "transparent",
-                        cursor: isEditing ? "pointer" : "default",
-                        borderRadius: 12,
-                      }}
-                    >
-                      <span
-  style={{
-    fontSize: isEditing ? 30 : 22,
-    lineHeight: 1,
-    marginRight: 12,
-    minWidth: 32,
-    textAlign: "center",
-  }}
->
-  {isEditing ? (checked ? "☑" : "☐") : checked ? "✓" : ""}
-</span>
-
-<span>{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              
 
               <div
                 style={{

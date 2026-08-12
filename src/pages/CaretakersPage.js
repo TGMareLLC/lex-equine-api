@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
+import BottomNav from "../components/BottomNav";
 import {
   addDoc,
   collection,
@@ -11,28 +12,29 @@ import {
   serverTimestamp,
   where,
   getDocs,
-  updateDoc,
+  setDoc,
+  deleteDoc,
   doc,
 } from "firebase/firestore";
 
-export default function CaretakersPage({ user, horses = [] }) {
+export default function CaretakersPage({
+  user,
+  horses = [],
+  careHorses = [],
+  isCaretakerOnly = false,
+  onCaretakerAccessChanged,
+}) {
   const navigate = useNavigate();
 
   const [caretakers, setCaretakers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [, setSaving] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [caretakerName, setCaretakerName] = useState("");
-  const [caretakerEmail, setCaretakerEmail] = useState("");
   const [selectedHorseIds, setSelectedHorseIds] = useState([]);
   const [joinInviteCode, setJoinInviteCode] = useState("");
 
-  const [permissions, setPermissions] = useState({
-    viewHorse: true,
-    completeCare: true,
-    addLogs: true,
-    viewEmergencyContacts: true,
-  });
+  
 
   const toggleHorseSelection = (horseId) => {
     setSelectedHorseIds((current) =>
@@ -42,12 +44,7 @@ export default function CaretakersPage({ user, horses = [] }) {
     );
   };
 
-  const togglePermission = (key) => {
-    setPermissions((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
-  };
+  
 
   const generateInviteCode = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -85,11 +82,8 @@ export default function CaretakersPage({ user, horses = [] }) {
       ownerUid: user.uid,
       caretakerUid: "",
       caretakerName: caretakerName.trim(),
-      caretakerEmail: caretakerEmail.trim()
-  ? caretakerEmail.trim().toLowerCase()
-  : "",
+      
       horseIds: selectedHorseIds,
-      permissions,
       status: "pending",
       inviteCode,
       invitedAt: serverTimestamp(),
@@ -98,14 +92,8 @@ export default function CaretakersPage({ user, horses = [] }) {
     });
 
     setCaretakerName("");
-    setCaretakerEmail("");
     setSelectedHorseIds([]);
-    setPermissions({
-      viewHorse: true,
-      completeCare: true,
-      addLogs: true,
-      viewEmergencyContacts: true,
-    });
+    
     setShowInviteModal(false);
   } catch (error) {
     console.log("CREATE CARETAKER INVITE ERROR:", error);
@@ -153,15 +141,25 @@ try {
     return;
   }
 
-    await updateDoc(doc(db, "caretakerAccess", inviteDoc.id), {
-      caretakerUid: user.uid,
-      status: "active",
-      acceptedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    const activeAccessId = `${inviteData.ownerUid}_${user.uid}`;
 
-    setJoinInviteCode("");
-    alert("Caretaker access added.");
+await setDoc(doc(db, "caretakerAccess", activeAccessId), {
+  ...inviteData,
+  sourceInviteId: inviteDoc.id,
+  caretakerUid: user.uid,
+  status: "active",
+  acceptedAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
+
+await deleteDoc(doc(db, "caretakerAccess", inviteDoc.id));
+
+if (typeof onCaretakerAccessChanged === "function") {
+  await onCaretakerAccessChanged();
+}
+
+setJoinInviteCode("");
+alert("Caretaker access added.");
   } catch (error) {
     console.log("JOIN CARETAKER INVITE ERROR:", error);
     alert("Could not join caretaker invite.");
@@ -176,6 +174,9 @@ try {
     }
 
     setLoading(true);
+    
+
+
 
     const q = query(
       collection(db, "caretakerAccess"),
@@ -191,7 +192,9 @@ try {
         }));
 
         setCaretakers(rows);
-        setLoading(false);
+
+
+setLoading(false);
       },
       (error) => {
         console.log("LOAD CARETAKERS ERROR:", error);
@@ -227,7 +230,8 @@ try {
           ← Back
         </button>
 
-        <div
+        {!isCaretakerOnly ? (
+  <div
           style={{
             background: "#FFFFFF",
             border: "1px solid #E5E2DA",
@@ -317,15 +321,7 @@ try {
                     {caretaker.caretakerName || "Unnamed Caretaker"}
                   </div>
 
-                  <div
-                    style={{
-                      color: "#6F6A60",
-                      fontSize: 14,
-                      marginBottom: 8,
-                    }}
-                  >
-                    {caretaker.caretakerEmail || "No email"}
-                  </div>
+                  
 
                   <div
   style={{
@@ -365,16 +361,17 @@ try {
                 </div>
               ))}
             </div>
-          )}
-                </div>
-      </div>
+                    )}
+        </div>
+      ) : null}
+    </div>
 
-      <div
-        style={{
-          maxWidth: 720,
-          margin: "20px auto 0",
-        }}
-      >
+    <div
+      style={{
+        maxWidth: 720,
+        margin: "20px auto 0",
+      }}
+    >
         <div
           style={{
             background: "#FFFFFF",
@@ -385,15 +382,17 @@ try {
           }}
         >
           <div
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: "#24324A",
-              marginBottom: 8,
-            }}
-          >
-            Join as a Caretaker
-          </div>
+  style={{
+    fontSize: 22,
+    fontWeight: 700,
+    color: "#24324A",
+    marginBottom: 8,
+  }}
+>
+  {careHorses.length > 0
+    ? "Join Another Horse"
+    : "Join as a Caretaker"}
+</div>
 
           <div
             style={{
@@ -438,9 +437,95 @@ try {
             }}
           >
             Join
-          </button>
+                    </button>
         </div>
       </div>
+
+      {isCaretakerOnly ? (
+        <div
+          style={{
+            maxWidth: 720,
+            margin: "20px auto 0",
+          }}
+        >
+          <div
+            style={{
+              background: "#FFFFFF",
+              border: "1px solid #E5E2DA",
+              borderRadius: 24,
+              padding: 20,
+              boxShadow: "0 10px 24px rgba(24, 34, 51, 0.08)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#24324A",
+                marginBottom: 14,
+              }}
+            >
+              Horses You Care For
+            </div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              {careHorses.map((horse) => (
+                <div
+                  key={horse.id}
+                  style={{
+                    border: "1px solid #E5E2DA",
+                    borderRadius: 16,
+                    padding: 14,
+                    background: "#FBF8F2",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        color: "#24324A",
+                        fontSize: 17,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {horse.name || "Unnamed Horse"}
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 4,
+                        color: "#6F6A60",
+                        fontSize: 14,
+                      }}
+                    >
+                      {horse.age ? `${horse.age} yrs` : ""}
+                      {horse.sex ? ` • ${horse.sex}` : ""}
+                    </div>
+                  </div>
+
+                  {horse.photoUrl ? (
+                    <img
+                      src={horse.photoUrl}
+                      alt={horse.name || "Horse"}
+                      style={{
+                        width: 54,
+                        height: 54,
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                        border: "2px solid #E5E2DA",
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showInviteModal && (
         <div
@@ -502,20 +587,7 @@ try {
                 }}
               />
 
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={caretakerEmail}
-                onChange={(e) => setCaretakerEmail(e.target.value)}
-                style={{
-                  padding: "14px 16px",
-                  borderRadius: 14,
-                  border: "1px solid #E5E2DA",
-                  fontSize: 16,
-                  width: "100%",
-                  boxSizing: "border-box",
-                }}
-              />
+              
             </div>
 
             <div
@@ -570,57 +642,7 @@ try {
                   );
                 })
               )}
-            </div>
-
-            <div
-              style={{
-                marginBottom: 10,
-                color: "#24324A",
-                fontWeight: 700,
-                fontSize: 16,
-              }}
-            >
-              Permissions
-            </div>
-
-                        <div
-              style={{
-                border: "1px solid #E5E2DA",
-                borderRadius: 14,
-                padding: 12,
-                marginBottom: 24,
-                color: "#6F6A60",
-              }}
-            >
-              {[
-                ["viewHorse", "View Horse Information"],
-                ["completeCare", "Complete Care Tasks"],
-                ["addLogs", "Add Logs"],
-                ["viewEmergencyContacts", "View Emergency Contacts"],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => togglePermission(key)}
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    background: permissions[key] ? "#F6F4EE" : "transparent",
-                    borderRadius: 12,
-                    padding: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    color: "#24324A",
-                    fontWeight: 600,
-                    fontSize: 15,
-                    cursor: "pointer",
-                  }}
-                >
-                  <span>{label}</span>
-                  <span>{permissions[key] ? "✓" : ""}</span>
-                </button>
-              ))}
-            </div>
+                        </div>
 
             <div
               style={{
@@ -664,6 +686,8 @@ try {
           </div>
         </div>
       )}
+
+      <BottomNav />
     </div>
   );
 }

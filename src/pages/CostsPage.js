@@ -103,10 +103,9 @@ const navigate = useNavigate();
   const [exportEndDate, setExportEndDate] = useState("");
 
   const primaryText = "#1E1E1E";
+const borderColor = "#E5E2DA";
   const secondaryText = "#6F6A60";
-  const borderColor = "#E5E2DA";
   const navy = "#24324A";
-  const navyPressed = "#1B2538";
   const navyBorder = "#31425F";
   const homeBg = "#F6F4EE";
   const burgundy = "#7A2E2E";

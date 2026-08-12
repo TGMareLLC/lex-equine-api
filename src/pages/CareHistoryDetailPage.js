@@ -302,7 +302,7 @@ React.useEffect(() => {
   >
     <img
       src={selectedPhoto}
-      alt="Care Photo"
+      alt="Care attachment"
       style={{
         maxWidth: "100%",
         maxHeight: "100%",

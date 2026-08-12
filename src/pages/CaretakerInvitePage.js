@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { db } from "../firebase";
 import { doc, onSnapshot } from "firebase/firestore";
 
 export default function CaretakerInvitePage({ user }) {
-  const navigate = useNavigate();
   const { inviteId } = useParams();
 
   const [invite, setInvite] = useState(null);
@@ -122,7 +121,7 @@ export default function CaretakerInvitePage({ user }) {
                 </div>
 
                 <div style={{ color: "#6F6A60", fontSize: 15 }}>
-                  {invite.caretakerEmail || "Caretaker"}
+                  {invite.caretakerName || "Caretaker"}
                 </div>
               </div>
 

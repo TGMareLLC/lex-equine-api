@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { db, storage } from "../firebase";
 import { doc, getDoc, deleteDoc } from "firebase/firestore";
@@ -45,14 +45,13 @@ export default function DocumentDetailPage({ user, onAsk }) {
 
   const primaryText = "#1E1E1E";
   const secondaryText = "#6F6A60";
-  const borderColor = "#E5E2DA";
   const burgundy = "#7A2E2E";
   const navy = "#24324A";
   const homeBg = "#F6F4EE";
   const goldBg = "#F5EEDB";
   const goldText = "#6E5A36";
 
-  const loadDocument = async () => {
+  const loadDocument = useCallback(async () => {
     if (!documentId) return;
 
     try {
@@ -70,11 +69,11 @@ export default function DocumentDetailPage({ user, onAsk }) {
       console.log("LOAD DOCUMENT ERROR:", e);
       setStatus("Could not load document.");
     }
-  };
+  }, [documentId]);
 
   useEffect(() => {
-    loadDocument();
-  }, [documentId]);
+  loadDocument();
+}, [loadDocument]);
 
   const handleDelete = async () => {
     if (!documentData) return;

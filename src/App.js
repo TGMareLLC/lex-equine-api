@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { auth, db } from "./firebase";
 import {
   onAuthStateChanged,
+  signOut,
   signInWithEmailAndPassword,
 } from "firebase/auth";
 import {
@@ -16,7 +17,9 @@ import {
   getDoc,
   getDocFromServer,
   setDoc,
-  documentId,
+  deleteDoc,
+  onSnapshot,
+  serverTimestamp,
 } from "firebase/firestore";
 import { App as CapApp } from "@capacitor/app";
 import { LocalNotifications } from "@capacitor/local-notifications";
@@ -49,6 +52,8 @@ import CaretakerDetailPage from "./pages/CaretakerDetailPage";
 import CaretakerInvitePage from "./pages/CaretakerInvitePage";
 import DailyCarePlanPage from "./pages/DailyCarePlanPage";
 import CareHistoryDetailPage from "./pages/CareHistoryDetailPage";
+import { AccessProvider } from "./context/AccessContext";
+
 
 import {
   markAppActiveNow,
@@ -58,6 +63,7 @@ import {
 
 import useSubscription from "./utils/useSubscription";
 import useOnlineStatus from "./hooks/useOnlineStatus";
+
 
 const API_BASE_URL = "https://lex-equine-api.onrender.com";
 const REVENUECAT_APPLE_API_KEY = "appl_YCPSrlftkAWXgFJKxjnMJzDDfak"
@@ -105,48 +111,86 @@ async function registerForPushNotifications(user) {
   }
 
   try {
-
     let permissionStatus = await PushNotifications.checkPermissions();
-
 
     if (permissionStatus.receive !== "granted") {
       permissionStatus = await PushNotifications.requestPermissions();
     }
 
     if (permissionStatus.receive !== "granted") {
+      console.log("PUSH PERMISSION NOT GRANTED");
       return;
     }
 
-await PushNotifications.addListener("registration", async (token) => {
+    await PushNotifications.removeAllListeners();
 
+    await PushNotifications.addListener(
+      "registration",
+      async (apnsToken) => {
+        try {
+          console.log("APNS TOKEN:", apnsToken.value);
 
-  console.log("APNS TOKEN:", token.value);
+          const fcmTokenResult = await FirebaseMessaging.getToken();
+          const freshFcmToken = fcmTokenResult?.token || "";
 
-  const fcmTokenResult = await FirebaseMessaging.getToken();
+          console.log("FCM TOKEN:", freshFcmToken);
 
-  console.log("FCM TOKEN:", fcmTokenResult.token);
+          if (!freshFcmToken) {
+            console.log("FCM TOKEN SAVE SKIPPED: No token returned.");
+            return;
+          }
 
-  await setDoc(
-    doc(db, "users", user.uid),
-    {
-      pushToken: fcmTokenResult.token,
-      apnsToken: token.value,
-      pushPlatform: Capacitor.getPlatform(),
-      pushTokenUpdatedAt: Date.now(),
-      notificationsEnabled: true,
-    },
-    { merge: true }
-  );
-});
+          await setDoc(
+            doc(db, "users", user.uid),
+            {
+              pushToken: freshFcmToken,
+              apnsToken: apnsToken.value,
+              pushPlatform: Capacitor.getPlatform(),
+              pushTokenUpdatedAt: Date.now(),
+              notificationsEnabled: true,
+            },
+            { merge: true }
+          );
 
-    await PushNotifications.addListener("registrationError", (error) => {
-      console.log("PUSH REGISTRATION ERROR:", error);
+          console.log("PUSH TOKEN SAVED:", freshFcmToken);
+        } catch (error) {
+          console.log("FCM TOKEN REGISTRATION ERROR:", error);
+        }
+      }
+    );
+
+    await PushNotifications.addListener(
+  "registrationError",
+  (error) => {
+    console.log("PUSH REGISTRATION ERROR:", error);
+  }
+);
+
+await PushNotifications.addListener(
+  "pushNotificationReceived",
+  async (notification) => {
+    console.log(
+      "FOREGROUND PUSH RECEIVED:",
+      JSON.stringify(notification)
+    );
+
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: Math.floor(Date.now() % 2147483647),
+          title: notification.title || "Lex Equine",
+          body: notification.body || "",
+          schedule: { at: new Date(Date.now() + 500) },
+          extra: notification.data || {},
+        },
+      ],
     });
+  }
+);
 
-    await PushNotifications.register();
-
-  } catch (e) {
-    console.log("REGISTER PUSH ERROR:", e);
+await PushNotifications.register();
+  } catch (error) {
+    console.log("REGISTER PUSH ERROR:", error);
   }
 }
 
@@ -344,12 +388,15 @@ function AppRoutes(props) {
   const {
     user,
     role,
+    isCaretakerOnly,
     horses,
-    setHorses,
-    horsesStatus,
-        careHorses,
-    careHorsesStatus,
-    setHorsesStatus,
+setHorses,
+horsesStatus,
+careHorses,
+careHorsesStatus,
+setHorsesStatus,
+refreshUserState,
+refreshHorseAccessState,
     activeHorseId,
     setActiveHorseId,
     question,
@@ -483,6 +530,7 @@ function AppRoutes(props) {
               <HomePage
                 user={user}
                 role={role}
+                isCaretakerOnly={isCaretakerOnly}
                 horses={horses}
                 careHorses={careHorses}
 careHorsesStatus={careHorsesStatus}
@@ -518,86 +566,139 @@ careHorsesStatus={careHorsesStatus}
         />
 
         <Route
-          path="/account"
-          element={
-            <ProtectedRoute user={user}>
-              <AccountPage user={user} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
-        />
+  path="/account"
+  element={
+    <ProtectedRoute user={user}>
+      <AccountPage
+        user={user}
+        onAsk={onAsk}
+        refreshUserState={refreshUserState}
+      />
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/horses"
-          element={
-            <ProtectedRoute user={user}>
-              <HorsesPage
-                user={user}
-                role={role}
-                horses={horses}
-                setHorses={setHorses}
-                horsesStatus={horsesStatus}
-                setHorsesStatus={setHorsesStatus}
-                activeHorseId={activeHorseId}
-                setActiveHorseId={setActiveHorseId}
-                onAsk={onAsk}
-              />
-            </ProtectedRoute>
-          }
-        />
+  path="/horses"
+  element={
+    <ProtectedRoute user={user}>
+      <HorsesPage
+        user={user}
+        role={role}
+        horses={isCaretakerOnly ? careHorses : horses}
+        setHorses={isCaretakerOnly ? () => {} : setHorses}
+        horsesStatus={
+          isCaretakerOnly ? careHorsesStatus : horsesStatus
+        }
+        setHorsesStatus={
+  isCaretakerOnly
+    ? () => {}
+    : setHorsesStatus
+}
+        activeHorseId={activeHorseId}
+        setActiveHorseId={setActiveHorseId}
+        onAsk={onAsk}
+      />
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/costs"
-          element={
-            <ProtectedRoute user={user}>
-              <CostsPage user={user} horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
+  path="/costs"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <CostsPage
+          user={user}
+          horses={horses}
+          onAsk={onAsk}
         />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/events"
-          element={
-            <ProtectedRoute user={user}>
-              <EventsPage user={user} horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
+  path="/events"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <EventsPage
+          user={user}
+          horses={horses}
+          onAsk={onAsk}
         />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/care"
-          element={
-            <ProtectedRoute user={user}>
-              <CarePage user={user} horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
+  path="/care"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <CarePage
+          user={user}
+          horses={horses}
+          onAsk={onAsk}
         />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/sick-watch"
-          element={
-            <ProtectedRoute user={user}>
-              <SickWatchPage horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
-        />
+  path="/sick-watch"
+  element={
+    isCaretakerOnly ? (
+      <Navigate to="/" replace />
+    ) : (
+      <ProtectedRoute user={user}>
+        <SickWatchPage horses={horses} onAsk={onAsk} />
+      </ProtectedRoute>
+    )
+  }
+/>
 
         <Route
-          path="/resources"
-          element={
-            <ProtectedRoute user={user}>
-              <ResourcesPage horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
+  path="/resources"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <ResourcesPage
+          horses={horses}
+          onAsk={onAsk}
         />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
                 <Route
-          path="/caretakers"
-          element={
-            <ProtectedRoute user={user}>
-              <CaretakersPage user={user} horses={horses} />
-            </ProtectedRoute>
-          }
-        />
+  path="/caretakers"
+  element={
+    <ProtectedRoute user={user}>
+      <CaretakersPage
+        user={user}
+        horses={horses}
+        careHorses={careHorses}
+        isCaretakerOnly={isCaretakerOnly}
+        onCaretakerAccessChanged={() =>
+  refreshHorseAccessState(user?.uid)
+}
+      />
+    </ProtectedRoute>
+  }
+/>
 
         <Route
   path="/caretakers/:caretakerId"
@@ -633,22 +734,34 @@ careHorsesStatus={careHorsesStatus}
 />
 
         <Route
-          path="/documents"
-          element={
-            <ProtectedRoute user={user}>
-              <DocumentsPage user={user} horses={horses} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
+  path="/documents"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <DocumentsPage
+          user={user}
+          horses={horses}
+          onAsk={onAsk}
         />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
         <Route
-          path="/documents/:documentId"
-          element={
-            <ProtectedRoute user={user}>
-              <DocumentDetailPage user={user} onAsk={onAsk} />
-            </ProtectedRoute>
-          }
-        />
+  path="/documents/:documentId"
+  element={
+    <ProtectedRoute user={user}>
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <DocumentDetailPage user={user} onAsk={onAsk} />
+      )}
+    </ProtectedRoute>
+  }
+/>
 
         <Route
   path="/caretaker-invite/:inviteId"
@@ -678,6 +791,7 @@ export default function App() {
   const [horsesStatus, setHorsesStatus] = useState("");
   const [careHorses, setCareHorses] = useState([]);
 const [careHorsesStatus, setCareHorsesStatus] = useState("");
+const [hasActiveCaretakerAccess, setHasActiveCaretakerAccess] = useState(false);
 
   const [resources, setResources] = useState([]);
   const [resourcesStatus, setResourcesStatus] = useState("Loading resources...");
@@ -686,6 +800,7 @@ const [careHorsesStatus, setCareHorsesStatus] = useState("");
 
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
+  const [userType, setUserType] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [email, setEmail] = useState("");
@@ -693,7 +808,12 @@ const [careHorsesStatus, setCareHorsesStatus] = useState("");
   const [userAccess, setUserAccess] = useState(null);
   const [userAccessLoading, setUserAccessLoading] = useState(true);
   const [selectedPlanId, setSelectedPlanId] = useState("$rc_annual");
+  const [monthlyPrice, setMonthlyPrice] = useState("");
+const [annualPrice, setAnnualPrice] = useState("");
   const [showIntro, setShowIntro] = useState(false);
+  const [showCaretakerEntry, setShowCaretakerEntry] = useState(false);
+  const [caretakerInviteCode, setCaretakerInviteCode] = useState("");
+const [joiningCaretakerInvite, setJoiningCaretakerInvite] = useState(false);
 
   const { isActive: hasPaidSubscription, loading: subLoading } = useSubscription(userAccess);
   const isOnline = useOnlineStatus();
@@ -707,16 +827,26 @@ const trialDaysLeft = Math.max(
 
 const hasAccessOverride = !!userAccess?.subscriptionOverride;
 
+const hasCaretakerAccess = hasActiveCaretakerAccess;
+
 const isTrialActive =
   !hasPaidSubscription &&
   !hasAccessOverride &&
   trialEndsAt > now;
 
-const accessState = hasPaidSubscription || hasAccessOverride
-  ? "ACTIVE_SUBSCRIPTION"
-  : isTrialActive
-  ? "TRIAL_ACTIVE"
-  : "NO_ACCESS";
+const accessState =
+  userType === "caretaker"
+    ? hasCaretakerAccess
+      ? "CARETAKER_ACCESS"
+      : "CARETAKER_NEEDS_INVITE"
+    : hasPaidSubscription || hasAccessOverride
+    ? "ACTIVE_SUBSCRIPTION"
+    : isTrialActive
+    ? "TRIAL_ACTIVE"
+    : "NO_ACCESS";
+
+const isCaretakerOnly =
+  userType === "caretaker";
 
   const ADMIN_EMAIL = "tgmarellc@outlook.com";
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -734,92 +864,207 @@ const accessState = hasPaidSubscription || hasAccessOverride
     }
   };
 
-  const loadHorsesForUser = async (uid) => {
-    if (!uid) {
-  setHorses([]);
-  setHorsesStatus("");
-  setCareHorses([]);
-  setCareHorsesStatus("");
-  return;
-}
+  const refreshHorseAccessState = async (uid) => {
+  if (!uid) {
+    setHorses([]);
+    setHorsesStatus("");
 
-    try {
-      setHorsesStatus("Loading horses...");
+    setCareHorses([]);
+    setCareHorsesStatus("");
 
-      const qh = query(collection(db, "horses"), where("ownerUid", "==", uid));
-      const hsnap = await getDocs(qh);
-      const hitems = hsnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const careAccessQuery = query(
-  collection(db, "caretakerAccess"),
-  where("caretakerUid", "==", uid),
-  where("status", "==", "active")
-);
+    setHasActiveCaretakerAccess(false);
 
-const careAccessSnap = await getDocs(careAccessQuery);
+    return {
+      ownerHorses: [],
+      careHorses: [],
+      hasActiveCaretakerAccess: false,
+    };
+  }
 
-const careHorseIds = [
-  ...new Set(
-    careAccessSnap.docs.flatMap((docSnap) => docSnap.data().horseIds || [])
-  ),
-];
+  try {
+    setHorsesStatus("Loading horses...");
 
-const careAccessByHorseId = {};
+    const ownerHorseQuery = query(
+      collection(db, "horses"),
+      where("ownerUid", "==", uid)
+    );
 
-careAccessSnap.docs.forEach((docSnap) => {
-  const access = { id: docSnap.id, ...docSnap.data() };
+    const caretakerAccessQuery = query(
+      collection(db, "caretakerAccess"),
+      where("caretakerUid", "==", uid),
+      where("status", "==", "active")
+    );
 
-  (access.horseIds || []).forEach((horseId) => {
-    careAccessByHorseId[horseId] = access;
-  });
-});
+    const [ownerHorseSnap, caretakerAccessSnap] = await Promise.all([
+      getDocs(ownerHorseQuery),
+      getDocs(caretakerAccessQuery),
+    ]);
 
-setCareHorses([]);
-setCareHorsesStatus(
-  careHorseIds.length ? "Loading care horses..." : ""
-);
+    const ownerHorseItems = ownerHorseSnap.docs.map((horseDoc) => ({
+      id: horseDoc.id,
+      ...horseDoc.data(),
+    }));
 
-let careHorseItems = [];
+    setHorses(ownerHorseItems);
+    setHorsesStatus(
+      ownerHorseItems.length ? "" : "No horses added yet."
+    );
 
-if (careHorseIds.length > 0) {
-  const careHorseQuery = query(
-    collection(db, "horses"),
-    where(documentId(), "in", careHorseIds.slice(0, 10))
-  );
+    const accessRecords = caretakerAccessSnap.docs.map((accessDoc) => ({
+      id: accessDoc.id,
+      ...accessDoc.data(),
+    }));
 
-  const careHorseSnap = await getDocs(careHorseQuery);
+    const hasActiveAccess = accessRecords.length > 0;
 
-  careHorseItems = careHorseSnap.docs.map((d) => {
-  const access = careAccessByHorseId[d.id];
+    setHasActiveCaretakerAccess(hasActiveAccess);
 
-  return {
-  id: d.id,
-  ...d.data(),
-  isCareHorse: true,
-  caretakerAccessId: access?.id || "",
-  caretakerPermissions: access?.permissions || {},
-  caretakerOwnerUid: access?.ownerUid || "",
-  caretakerName: access?.caretakerName || "",
-};
-});
-}
+    const careAccessByHorseId = {};
 
-setCareHorses(careHorseItems);
-setCareHorsesStatus(
-  careHorseItems.length ? "" : careHorseIds.length ? "Could not load care horses." : ""
-);
+    accessRecords.forEach((access) => {
+      (access.horseIds || []).forEach((horseId) => {
+        careAccessByHorseId[horseId] = access;
+      });
+    });
 
-      setHorses(hitems);
-      setHorsesStatus(hitems.length ? "" : "No horses added yet.");
-    } catch (e) {
-      console.log("LOAD HORSES ERROR:", e);
-      setHorses([]);
-      setHorsesStatus("Could not load horses.");
+    const careHorseIds = [
+      ...new Set(Object.keys(careAccessByHorseId)),
+    ];
+
+    if (careHorseIds.length === 0) {
+      setCareHorses([]);
+      setCareHorsesStatus("");
+
+      return {
+        ownerHorses: ownerHorseItems,
+        careHorses: [],
+        hasActiveCaretakerAccess: hasActiveAccess,
+      };
     }
-  };
+
+    setCareHorsesStatus("Loading care horses...");
+
+    const careHorseSnapshots = await Promise.all(
+      careHorseIds.map((horseId) =>
+        getDoc(doc(db, "horses", horseId))
+      )
+    );
+
+    const careHorseItems = careHorseSnapshots
+      .filter((horseSnap) => horseSnap.exists())
+      .map((horseSnap) => {
+        const access = careAccessByHorseId[horseSnap.id];
+
+        return {
+          id: horseSnap.id,
+          ...horseSnap.data(),
+          isCareHorse: true,
+          caretakerAccessId: access?.id || "",
+          caretakerOwnerUid: access?.ownerUid || "",
+          caretakerName: access?.caretakerName || "",
+        };
+      });
+
+    setCareHorses(careHorseItems);
+
+    setCareHorsesStatus(
+      careHorseItems.length
+        ? ""
+        : "Could not load care horses."
+    );
+
+    return {
+      ownerHorses: ownerHorseItems,
+      careHorses: careHorseItems,
+      hasActiveCaretakerAccess: hasActiveAccess,
+    };
+  } catch (error) {
+    console.log("REFRESH HORSE ACCESS STATE ERROR:", error);
+
+    setHorses([]);
+    setHorsesStatus("Could not load horses.");
+
+    setCareHorses([]);
+    setCareHorsesStatus("Could not load care horses.");
+
+    setHasActiveCaretakerAccess(false);
+
+    throw error;
+  }
+};
+
+  const refreshUserState = async (authUser) => {
+
+  const uid = authUser?.uid;
+
+  if (!uid) {
+    setUserAccess(null);
+    setUserType(null);
+    setRole(null);
+
+    setHorses([]);
+    setHorsesStatus("");
+
+    setCareHorses([]);
+    setCareHorsesStatus("");
+
+    setHasActiveCaretakerAccess(false);
+
+    return null;
+  }
+
+  try {
+    // 1. Load the user's account document.
+    
+
+const accessData = await ensureUserAccessDoc(authUser);
+
+
+
+    const currentUserType = accessData?.userType || null;
+
+    // Account type comes ONLY from users/{uid}.userType.
+    setUserAccess(accessData);
+    setUserType(currentUserType);
+    setRole(
+      currentUserType === "caretaker"
+        ? "volunteer"
+        : currentUserType === "owner"
+        ? "owner"
+        : null
+    );
+
+    const horseAccessState = await refreshHorseAccessState(uid);
+
+return {
+  accessData,
+  userType: currentUserType,
+  ownerHorses: horseAccessState.ownerHorses,
+  careHorses: horseAccessState.careHorses,
+  hasActiveCaretakerAccess:
+    horseAccessState.hasActiveCaretakerAccess,
+};
+  } catch (error) {
+    console.log("REFRESH USER STATE ERROR:", error);
+
+    // A data-loading failure must NEVER change account type.
+    setHorses([]);
+    setHorsesStatus("Could not load horses.");
+
+    setCareHorses([]);
+    setCareHorsesStatus("Could not load care horses.");
+
+    setHasActiveCaretakerAccess(false);
+
+    throw error;
+  }
+};
 
   useEffect(() => {
     loadResources();
   }, []);
+
+  
 
   const buildRoleContext = () => {
     if (role === "volunteer") {
@@ -914,6 +1159,140 @@ setCareHorsesStatus(
       setAnswer(errorMessage);
     }
     return errorMessage;
+  }
+};
+
+const handleUserTypeSelection = async (selectedUserType) => {
+  if (!user?.uid) return;
+
+  try {
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+
+    const existingData = userSnap.exists()
+      ? userSnap.data()
+      : {};
+
+    const existingUserType = existingData?.userType || "";
+
+    // Owner status is permanent. Never downgrade an owner to caretaker.
+    const finalUserType =
+      existingUserType === "owner"
+        ? "owner"
+        : selectedUserType;
+
+    const updates = {
+      userType: finalUserType,
+      updatedAt: Date.now(),
+    };
+
+    // Start the 14-day owner trial only when this account
+    // becomes an owner for the first time.
+    if (
+      finalUserType === "owner" &&
+      existingUserType !== "owner"
+    ) {
+      const trialStartedAt = Date.now();
+
+      updates.trialStartedAt = trialStartedAt;
+      updates.trialEndsAt =
+        trialStartedAt + 14 * 24 * 60 * 60 * 1000;
+      updates.subscriptionOverride = false;
+    }
+
+    await setDoc(
+      userRef,
+      updates,
+      { merge: true }
+    );
+
+    await refreshUserState(user);
+
+    if (finalUserType === "caretaker") {
+      setShowCaretakerEntry(true);
+    } else {
+      setShowCaretakerEntry(false);
+    }
+  } catch (error) {
+    console.log("SAVE USER TYPE ERROR:", error);
+    alert("Could not save your selection. Please try again.");
+  }
+};
+
+const handleCaretakerEntryJoin = async () => {
+  if (!user?.uid) {
+    alert("You must be logged in to join as a caretaker.");
+    return;
+  }
+
+  const code = caretakerInviteCode.trim().toUpperCase();
+
+  if (!code) {
+    alert("Please enter your invite code.");
+    return;
+  }
+
+  try {
+    setJoiningCaretakerInvite(true);
+
+    const inviteQuery = query(
+      collection(db, "caretakerAccess"),
+      where("inviteCode", "==", code),
+      where("status", "==", "pending"),
+      where("caretakerUid", "==", "")
+    );
+
+    const inviteSnap = await getDocs(inviteQuery);
+
+    if (inviteSnap.empty) {
+      alert("Invite code not found.");
+      return;
+    }
+
+    const inviteDoc = inviteSnap.docs[0];
+const inviteData = inviteDoc.data();
+
+const activeAccessId = `${inviteData.ownerUid}_${user.uid}`;
+
+await setDoc(doc(db, "caretakerAccess", activeAccessId), {
+  ...inviteData,
+  sourceInviteId: inviteDoc.id,
+  caretakerUid: user.uid,
+  status: "active",
+  acceptedAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
+
+await deleteDoc(doc(db, "caretakerAccess", inviteDoc.id));
+
+await refreshHorseAccessState(user.uid);
+
+setCaretakerInviteCode("");
+setShowCaretakerEntry(false);
+
+    alert("Caretaker access added.");
+  } catch (error) {
+    console.log("CARETAKER ENTRY JOIN ERROR:", error);
+    alert("Could not join the caretaker invite.");
+  } finally {
+    setJoiningCaretakerInvite(false);
+  }
+};
+
+const handleRemainCaretaker = async () => {
+  if (!user?.uid || !hasCaretakerAccess) return;
+
+  try {
+    await updateDoc(doc(db, "users", user.uid), {
+      userType: "caretaker",
+      updatedAt: Date.now(),
+    });
+
+    await refreshUserState(user);
+    setShowCaretakerEntry(false);
+  } catch (error) {
+    console.log("REMAIN CARETAKER ERROR:", error);
+    alert("Could not return to caretaker access.");
   }
 };
 
@@ -1019,6 +1398,36 @@ const addResource = async () => {
         apiKey: REVENUECAT_APPLE_API_KEY,
         appUserID: u.uid,
       });
+
+      const offerings = await Purchases.getOfferings();
+const current = offerings.current;
+
+if (current) {
+  const monthlyPackage = current.availablePackages.find(
+    (item) => item.identifier === "$rc_monthly"
+  );
+
+  const annualPackage = current.availablePackages.find(
+    (item) => item.identifier === "$rc_annual"
+  );
+
+  setMonthlyPrice(
+    monthlyPackage?.product?.priceString ||
+      monthlyPackage?.storeProduct?.priceString ||
+      ""
+  );
+
+  setAnnualPrice(
+    annualPackage?.product?.priceString ||
+      annualPackage?.storeProduct?.priceString ||
+      ""
+  );
+
+  console.log(
+    "APP PAYWALL SUBSCRIPTION PACKAGES:",
+    current.availablePackages
+  );
+}
     }
   } catch (e) {
     console.log("REVENUECAT INIT ERROR:", e);
@@ -1027,32 +1436,25 @@ const addResource = async () => {
       setActiveHorseId("");
 
       if (!u) {
-  setRole(null);
-setHorses([]);
-setHorsesStatus("");
-setUserAccess(null);
-setUserAccessLoading(false);
-setAuthLoading(false);
-return;
+  await refreshUserState(null);
+
+  setUserAccessLoading(false);
+  setAuthLoading(false);
+  return;
 }
 
 try {
-  const accessData = await ensureUserAccessDoc(u);
-  setUserAccess(accessData);
+  const refreshedState = await refreshUserState(u);
 
   await registerForPushNotifications(u);
 
-  // NEW: show onboarding if brand new user
-  if (!accessData?.hasSeenIntro) {
+  if (!refreshedState?.accessData?.hasSeenIntro) {
     setShowIntro(true);
   }
 } catch (e) {
-  console.log("ENSURE USER ACCESS DOC ERROR:", e);
-  setUserAccess(null);
+  console.log("INITIAL USER STATE LOAD ERROR:", e);
 }
 
-loadHorsesForUser(u.uid).catch(() => {});
-setRole("owner");
 setUserAccessLoading(false);
 setAuthLoading(false);
     });
@@ -1065,7 +1467,34 @@ setAuthLoading(false);
       clearTimeout(timeout);
       unsub();
     };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+  if (!user?.uid) return;
+
+  const caretakerAccessQuery = query(
+    collection(db, "caretakerAccess"),
+    where("caretakerUid", "==", user.uid)
+  );
+
+  const unsub = onSnapshot(
+    caretakerAccessQuery,
+    async () => {
+      try {
+        await refreshHorseAccessState(user.uid);
+      } catch (error) {
+        console.log("CARETAKER ACCESS LIVE REFRESH ERROR:", error);
+      }
+    },
+    (error) => {
+      console.log("CARETAKER ACCESS LISTENER ERROR:", error);
+    }
+  );
+
+  return () => unsub();
+}, [user?.uid]);
 
   if (authLoading || userAccessLoading || subLoading || (user && !userAccess)) {
     return (
@@ -1093,6 +1522,214 @@ console.log("USER ACCESS DEBUG", {
   isTrialActive,
   accessState,
 });
+
+if (user && !userType) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        background: "#F6F4EE",
+        boxSizing: "border-box",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "#FFFFFF",
+          border: "1px solid #E5E2DA",
+          borderRadius: 22,
+          padding: 24,
+          boxShadow: "0 10px 22px rgba(24, 34, 51, 0.08)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 30,
+            fontWeight: 600,
+            color: "#24324A",
+            marginBottom: 10,
+            lineHeight: 1.1,
+          }}
+        >
+          Welcome to Lex Equine
+        </div>
+
+        <div
+          style={{
+            fontSize: 16,
+            color: "#6F6A60",
+            lineHeight: 1.5,
+            marginBottom: 22,
+          }}
+        >
+          How will you use Lex?
+        </div>
+
+        <button
+          type="button"
+          onClick={() => handleUserTypeSelection("owner")}
+          style={{
+            width: "100%",
+            border: "none",
+            borderRadius: 14,
+            padding: "16px",
+            background: "#24324A",
+            color: "#FFFFFF",
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          I own horses
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleUserTypeSelection("caretaker")}
+          style={{
+            width: "100%",
+            marginTop: 12,
+            border: "1px solid #24324A",
+            borderRadius: 14,
+            padding: "16px",
+            background: "#FFFFFF",
+            color: "#24324A",
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          I'm caring for someone else's horses
+        </button>
+      </div>
+    </div>
+  );
+}
+
+if (
+  user &&
+  (showCaretakerEntry || accessState === "CARETAKER_NEEDS_INVITE")
+) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        background: "#F6F4EE",
+        boxSizing: "border-box",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "#FFFFFF",
+          border: "1px solid #E5E2DA",
+          borderRadius: 22,
+          padding: 24,
+          boxShadow: "0 10px 22px rgba(24, 34, 51, 0.08)",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 30,
+            fontWeight: 600,
+            color: "#24324A",
+            marginBottom: 10,
+            lineHeight: 1.1,
+          }}
+        >
+          Enter Invite Code
+        </div>
+
+        <div
+          style={{
+            fontSize: 15,
+            color: "#6F6A60",
+            lineHeight: 1.5,
+            marginBottom: 18,
+          }}
+        >
+          Enter the code sent to you by the horse owner.
+        </div>
+
+        <input
+          type="text"
+          placeholder="Invite Code"
+          value={caretakerInviteCode}
+          onChange={(e) =>
+            setCaretakerInviteCode(e.target.value.toUpperCase())
+          }
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "14px 16px",
+            borderRadius: 14,
+            border: "1px solid #E5E2DA",
+            fontSize: 16,
+            marginBottom: 14,
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={handleCaretakerEntryJoin}
+          disabled={joiningCaretakerInvite}
+          style={{
+            width: "100%",
+            border: "none",
+            borderRadius: 14,
+            padding: "14px",
+            background: "#24324A",
+            color: "#FFFFFF",
+            fontSize: 16,
+            fontWeight: 700,
+            cursor: joiningCaretakerInvite ? "not-allowed" : "pointer",
+            opacity: joiningCaretakerInvite ? 0.7 : 1,
+          }}
+        >
+          {joiningCaretakerInvite ? "Joining..." : "Continue"}
+        </button>
+
+        <button
+  type="button"
+  onClick={async () => {
+    setCaretakerInviteCode("");
+
+    if (accessState === "CARETAKER_NEEDS_INVITE") {
+      await signOut(auth);
+      return;
+    }
+
+    setShowCaretakerEntry(false);
+  }}
+  style={{
+    width: "100%",
+    marginTop: 12,
+    border: "1px solid #E5E2DA",
+    borderRadius: 14,
+    padding: "13px",
+    background: "#FFFFFF",
+    color: "#24324A",
+    fontSize: 15,
+    fontWeight: 600,
+    cursor: "pointer",
+  }}
+>
+  Cancel
+</button>
+      </div>
+    </div>
+  );
+}
 
 if (user && accessState === "NO_ACCESS") {
   return (
@@ -1165,7 +1802,7 @@ if (user && accessState === "NO_ACCESS") {
   >
     <div style={{ fontWeight: 700 }}>Monthly</div>
     <div style={{ marginTop: 4, fontSize: 14, color: "#6F6A60" }}>
-      $19.00 per month
+      {monthlyPrice ? `${monthlyPrice} per month` : "Monthly subscription"}
     </div>
   </button>
 
@@ -1187,7 +1824,7 @@ if (user && accessState === "NO_ACCESS") {
   >
     <div style={{ fontWeight: 700 }}>Annual</div>
     <div style={{ marginTop: 4, fontSize: 14, color: "#6F6A60" }}>
-      $189.00 per year
+      {annualPrice ? `${annualPrice} per year` : "Annual subscription"}
     </div>
   </button>
 </div>
@@ -1202,6 +1839,33 @@ if (user && accessState === "NO_ACCESS") {
   ? "Start Monthly Subscription"
   : "Start Annual Subscription"}
         </button>
+
+        <button
+  type="button"
+  onClick={() => {
+  if (hasCaretakerAccess) {
+    handleRemainCaretaker();
+  } else {
+    setShowCaretakerEntry(true);
+  }
+}}
+  style={{
+    width: "100%",
+    marginTop: 12,
+    border: "1px solid #24324A",
+    borderRadius: 14,
+    padding: "13px 16px",
+    background: "#FFFFFF",
+    color: "#24324A",
+    fontSize: 15,
+    fontWeight: 700,
+    cursor: "pointer",
+  }}
+>
+  {hasCaretakerAccess
+  ? "Decline Subscription & Remain a Caretaker"
+  : "I'm caring for someone else's horses"}
+</button>
 
         <button
   style={{
@@ -1266,8 +1930,9 @@ if (user && accessState === "NO_ACCESS") {
 }
 
   return (
-  <Router>
-    <div
+  <AccessProvider isCaretakerOnly={isCaretakerOnly}>
+    <Router>
+      <div
       style={{
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",
@@ -1340,20 +2005,28 @@ if (user && accessState === "NO_ACCESS") {
   </div>
 ) : null}
         <AppRoutes
-          user={user}
-          role={role}
-          horses={horses}
-          setHorses={setHorses}
-          horsesStatus={horsesStatus}
-          setHorsesStatus={setHorsesStatus}
-          careHorses={careHorses}
-careHorsesStatus={careHorsesStatus}
-          activeHorseId={activeHorseId}
-          setActiveHorseId={setActiveHorseId}
-          question={question}
-          setQuestion={setQuestion}
-          answer={answer}
-          onAsk={onAsk}
+  user={user}
+  role={role}
+  isCaretakerOnly={isCaretakerOnly}
+  horses={horses}
+  setHorses={setHorses}
+  horsesStatus={horsesStatus}
+  setHorsesStatus={setHorsesStatus}
+
+  careHorses={careHorses}
+  setCareHorses={setCareHorses}
+
+  careHorsesStatus={careHorsesStatus}
+  setCareHorsesStatus={setCareHorsesStatus}
+  refreshUserState={refreshUserState}
+  refreshHorseAccessState={refreshHorseAccessState}
+
+  activeHorseId={activeHorseId}
+  setActiveHorseId={setActiveHorseId}
+  question={question}
+  setQuestion={setQuestion}
+  answer={answer}
+  onAsk={onAsk}
           email={email}
           setEmail={setEmail}
           password={password}
@@ -1375,7 +2048,8 @@ careHorsesStatus={careHorsesStatus}
           addResource={addResource}
         />
       </div>
-    </div>
-  </Router>
+          </div>
+    </Router>
+  </AccessProvider>
 );
 }

@@ -33,9 +33,14 @@ export default function LoginPage({
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      alert("Enter your email and password.");
-      return;
-    }
+  alert("Enter email and password to create account.");
+  return;
+}
+
+if (password.length < 6) {
+  alert("Password must be at least 6 characters.");
+  return;
+}
 
     try {
       setLoading(true);
@@ -66,11 +71,26 @@ export default function LoginPage({
       await createUserWithEmailAndPassword(auth, email.trim(), password);
       navigate("/");
     } catch (e) {
-      console.log("CREATE ACCOUNT ERROR:", e);
-      alert("Could not create account.");
-    } finally {
-      setLoading(false);
-    }
+  console.log("CREATE ACCOUNT ERROR:", e);
+
+  switch (e.code) {
+    case "auth/email-already-in-use":
+      alert("An account already exists with this email.");
+      break;
+
+    case "auth/invalid-email":
+      alert("Please enter a valid email address.");
+      break;
+
+    case "auth/weak-password":
+      alert("Password must be at least 6 characters.");
+      break;
+
+    default:
+      alert("Could not create account. Please try again.");
+      break;
+  }
+}
   };
 
   const handlePasswordReset = async () => {

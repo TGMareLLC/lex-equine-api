@@ -58,6 +58,7 @@ const [photoUploading, setPhotoUploading] = React.useState(false);
 const [loading, setLoading] = React.useState(false);
 const [saving, setSaving] = React.useState(false);
 
+
 React.useEffect(() => {
   const loadDailyCarePlan = async () => {
     if (!horseId) return;
@@ -87,6 +88,8 @@ React.useEffect(() => {
 
   loadDailyCarePlan();
 }, [horseId]);
+
+
 
 const saveDailyCarePlan = async () => {
   if (!horseId) return;
@@ -180,7 +183,10 @@ const handleAddCarePhoto = async () => {
 };
 
 const notifyOwnerCareCompleted = async () => {
-  const ownerUid = horse?.ownerUid;
+  const ownerUid =
+  horse?.caretakerOwnerUid ||
+  horse?.ownerUid ||
+  "";
 
   if (!ownerUid) {
     console.log("CARE COMPLETION PUSH SKIPPED: Missing owner UID.");
@@ -189,10 +195,8 @@ const notifyOwnerCareCompleted = async () => {
 
   try {
     const caretakerDisplayName =
-      user.displayName ||
-      user.name ||
-      user.fullName ||
-      "Your caretaker";
+  horse?.caretakerName ||
+  "Your caretaker";
 
     const response = await fetch(`${API_BASE_URL}/send-push`, {
       method: "POST",
@@ -212,9 +216,9 @@ const notifyOwnerCareCompleted = async () => {
       }),
     });
 
-    const result = await response.json();
+    await response.json();
 
-    console.log("CARE COMPLETION PUSH:", result);
+    
   } catch (error) {
     console.log("CARE COMPLETION PUSH ERROR:", error);
   }
@@ -235,14 +239,12 @@ const completeTodaysCare = async () => {
   }));
 
 addDoc(collection(db, "care_history"), {
-  ownerUid: horse?.ownerUid || "",
+  ownerUid: horse?.caretakerOwnerUid || horse?.ownerUid || "",
   horseId,
   horseName: horse?.name || "",
   caretakerUid: user.uid,
   caretakerName:
-  user.displayName ||
-  user.name ||
-  user.fullName ||
+  horse?.caretakerName ||
   "Caretaker",
   completedAt: Date.now(),
   completedItems,

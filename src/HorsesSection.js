@@ -276,11 +276,8 @@ const [referencePhotoUploading, setReferencePhotoUploading] = useState(false);
   const [editingLogText, setEditingLogText] = useState("");
 
   const [logHistoryByHorseId, setLogHistoryByHorseId] = useState({});
-  const [logHistoryStatusByHorseId, setLogHistoryStatusByHorseId] = useState(
-    {}
-  );
-  const [logHistoryExpandedByHorseId, setLogHistoryExpandedByHorseId] =
-    useState({});
+  const [, setLogHistoryStatusByHorseId] = useState({});
+const [, setLogHistoryExpandedByHorseId] = useState({});
 
   const [careHistoryByHorseId, setCareHistoryByHorseId] = useState({});
   const [careHistoryStatusByHorseId, setCareHistoryStatusByHorseId] =
@@ -291,7 +288,7 @@ const [caretakerHistoryStatusByHorseId, setCaretakerHistoryStatusByHorseId] =
   useState({});
 const [viewCaretakerHistoryExpanded, setViewCaretakerHistoryExpanded] =
   useState(false);
-  const [selectedCareHistoryItem, setSelectedCareHistoryItem] = useState(null);
+  
 
   const [isHorseLexOpen, setIsHorseLexOpen] = useState(false);
   const [horseLexHorse, setHorseLexHorse] = useState(null);
@@ -303,8 +300,7 @@ const [viewCaretakerHistoryExpanded, setViewCaretakerHistoryExpanded] =
   const [horseLexSickWatchStatus, setHorseLexSickWatchStatus] = useState("");
 
   const [archiveByHorseId, setArchiveByHorseId] = useState({});
-  const [archiveStatusByHorseId, setArchiveStatusByHorseId] = useState({});
-  const [archiveExpandedByHorseId, setArchiveExpandedByHorseId] = useState({});
+  const [, setArchiveStatusByHorseId] = useState({});
   const [archiveModalCase, setArchiveModalCase] = useState(null);
   const [shareHorseModalOpen, setShareHorseModalOpen] = useState(false);
 const [shareHorseTarget, setShareHorseTarget] = useState(null);
@@ -314,8 +310,7 @@ const [shareHorseTarget, setShareHorseTarget] = useState(null);
   const [careItems, setCareItems] = useState([]);
   const [isCareOpen, setIsCareOpen] = useState(false);
   const [careHorse, setCareHorse] = useState(null);
-  const [isDailyCarePlanOpen, setIsDailyCarePlanOpen] = useState(false);
-const [dailyCareHorse, setDailyCareHorse] = useState(null);
+
 
   const [isAddCareOpen, setIsAddCareOpen] = useState(false);
   const [isFeedInventoryOpen, setIsFeedInventoryOpen] = useState(false);
@@ -443,25 +438,32 @@ setReferencePhotos([]);
   };
 
   const openView = async (horse) => {
-    setViewHorse(horse);
-    setIsViewOpen(true);
+  setViewHorse(horse);
+  setIsViewOpen(true);
 
-    setViewLogExpanded(false);
-    setViewCareHistoryExpanded(false);
-    setViewArchiveExpanded(false);
+  setViewLogExpanded(false);
+  setViewCareHistoryExpanded(false);
+  setViewCaretakerHistoryExpanded(false);
+  setViewArchiveExpanded(false);
 
-    if (horse?.id) {
-      await loadLogHistoryForHorse(horse.id);
-await loadCareHistoryForHorse(horse.id);
-await loadCaretakerHistoryForHorse(horse.id);
-await loadSickWatchArchiveForHorse(horse.id);
-    }
-  };
+  if (horse?.id && !horse.isCareHorse) {
+    await loadLogHistoryForHorse(horse.id);
+    await loadCareHistoryForHorse(horse.id);
+    await loadCaretakerHistoryForHorse(horse.id);
+    await loadSickWatchArchiveForHorse(horse.id);
+  }
+};
 
   const closeView = () => {
-    setViewHorse(null);
-    setIsViewOpen(false);
-  };
+  const wasCaretakerView = viewHorse?.isCareHorse === true;
+
+  setViewHorse(null);
+  setIsViewOpen(false);
+
+  if (wasCaretakerView) {
+    navigate("/", { replace: true });
+  }
+};
 
   const clearCareForm = () => {
     setCareType("Farrier");
@@ -814,9 +816,10 @@ const handleRemoveReferencePhoto = async (photoToRemove) => {
   const params = new URLSearchParams(location.search);
 
   const horseId = params.get("horseId");
-  const shouldOpenFeedInventory =
-    params.get("openFeedInventory") === "true";
-    const shouldOpenLog = params.get("openLog") === "true";
+const shouldOpenFeedInventory =
+  params.get("openFeedInventory") === "true";
+const shouldOpenLog = params.get("openLog") === "true";
+const shouldOpenView = params.get("openView") === "true";
 
   if (!horses || horses.length === 0) return;
 
@@ -828,6 +831,11 @@ const handleRemoveReferencePhoto = async (photoToRemove) => {
   }
   if (shouldOpenLog && selectedHorse) {
   openLog(selectedHorse);
+  navigate("/horses", { replace: true });
+}
+
+if (shouldOpenView && selectedHorse) {
+  openView(selectedHorse);
   navigate("/horses", { replace: true });
 }
 
@@ -893,7 +901,10 @@ setBlanketNotes(horse.blanketNotes || "");
     setHorsePhotoUrl(horse.photoUrl || "");
 setHorsePhotoBlob(null);
 setReferencePhotos(Array.isArray(horse.referencePhotos) ? horse.referencePhotos : []);
-setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
+setHorseVet({
+  ...emptyContact(),
+  ...getResolvedContact(horse, "vet"),
+});
     setHorseFarrier({ ...emptyContact(), ...(horse.farrier || {}) });
     setHorseTrainer({ ...emptyContact(), ...(horse.trainer || {}) });
     setHorseDentist({ ...emptyContact(), ...(horse.dentist || {}) });
@@ -1114,6 +1125,21 @@ setHorseVet({ ...emptyContact(), ...(horse.vet || {}) });
   if (!confirmed) return;
 
   try {
+    const photos = Array.isArray(item.photos) ? item.photos : [];
+
+    for (const photo of photos) {
+      if (!photo?.path) continue;
+
+      try {
+        await deleteObject(ref(storage, photo.path));
+      } catch (photoDeleteError) {
+        console.log(
+          "DELETE CARE HISTORY PHOTO ERROR:",
+          photoDeleteError
+        );
+      }
+    }
+
     await deleteDoc(doc(db, "care_history", item.id));
 
     if (item.horseId) {
@@ -2132,7 +2158,7 @@ const shareHorseCareInstructions = async (horse) => {
       await navigator.clipboard.writeText(shareText);
       alert("Could not attach files. Care instructions copied instead.");
     } catch {
-      alert("Could not share care instructions.");
+      alert("Could not Share Horse Card.");
     }
   }
 };
@@ -2650,8 +2676,155 @@ marginBottom: 14,
           </div>
         )}
       </div>
+{isViewOpen && viewHorse?.isCareHorse ? (
+  <div className="modal-backdrop" onClick={closeView}>
+    <div
+      className="modal-sheet"
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        maxHeight: "88vh",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+      }}
+    >
+      <div className="modal-handle" />
 
-      {isViewOpen && viewHorse ? (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 30,
+            fontWeight: 600,
+            color: navy,
+          }}
+        >
+          Horse Details
+        </h3>
+
+        <button
+          onClick={closeView}
+          style={{
+            background: "transparent",
+            border: "none",
+            fontSize: 24,
+            cursor: "pointer",
+            color: secondaryText,
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {viewHorse.photoUrl ? (
+        <img
+          src={viewHorse.photoUrl}
+          alt={viewHorse.name || "Horse"}
+          style={{
+            width: "100%",
+            maxHeight: 260,
+            objectFit: "cover",
+            borderRadius: 16,
+            marginTop: 12,
+          }}
+        />
+      ) : null}
+
+      <div style={{ display: "grid", gap: 16, marginTop: 18 }}>
+        <div>
+          <div style={{ fontSize: 13, color: secondaryText }}>Name</div>
+          <div
+            style={{
+              fontSize: 20,
+              color: primaryText,
+              fontWeight: 600,
+            }}
+          >
+            {viewHorse.name || "—"}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, color: secondaryText }}>Age</div>
+          <div style={{ fontSize: 16, color: primaryText }}>
+            {viewHorse.age || "—"}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, color: secondaryText }}>Sex</div>
+          <div style={{ fontSize: 16, color: primaryText }}>
+            {viewHorse.sex || "—"}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, color: secondaryText }}>
+            Veterinarian
+          </div>
+          <div style={{ fontSize: 16, color: primaryText }}>
+            {viewHorse.vet?.businessName ||
+              viewHorse.vet?.name ||
+              "Not provided"}
+          </div>
+
+          {viewHorse.vet?.phone ? (
+            <a
+              href={`tel:${viewHorse.vet.phone}`}
+              style={{
+                display: "inline-block",
+                marginTop: 4,
+                color: navy,
+                fontSize: 15,
+              }}
+            >
+              {viewHorse.vet.phone}
+            </a>
+          ) : null}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, color: secondaryText }}>Farrier</div>
+          <div style={{ fontSize: 16, color: primaryText }}>
+            {viewHorse.farrier?.businessName ||
+              viewHorse.farrier?.name ||
+              "Not provided"}
+          </div>
+
+          {viewHorse.farrier?.phone ? (
+            <a
+              href={`tel:${viewHorse.farrier.phone}`}
+              style={{
+                display: "inline-block",
+                marginTop: 4,
+                color: navy,
+                fontSize: 15,
+              }}
+            >
+              {viewHorse.farrier.phone}
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <button
+        className="secondary-button"
+        onClick={closeView}
+        style={{ width: "100%", marginTop: 22 }}
+      >
+        Close
+      </button>
+    </div>
+  </div>
+) : null}
+
+      {isViewOpen && viewHorse && !viewHorse.isCareHorse ? (
         <div className="modal-backdrop" onClick={closeView}>
           <div
             className="modal-sheet"
@@ -3457,7 +3630,7 @@ viewHorse.referencePhotos.length > 0 ? (
     setShareHorseModalOpen(true);
   }}
 >
-  Share Care Instructions
+  Share Horse Card
 </button>
 
   <button className="secondary-button" onClick={closeView}>
@@ -4622,7 +4795,7 @@ viewHorse.referencePhotos.length > 0 ? (
                   color: navy,
                 }}
               >
-                Share Care Instructions
+                Share Horse Card
               </h3>
 
               <button
@@ -4651,7 +4824,7 @@ viewHorse.referencePhotos.length > 0 ? (
                 lineHeight: 1.5,
               }}
             >
-              Choose how you want to send {shareHorseTarget.name || "this horse"}'s care instructions.
+              Choose how you want to share {shareHorseTarget.name || "this horse"}'s horse card.
             </div>
 
             <div style={{ display: "grid", gap: 10 }}>
@@ -4663,7 +4836,7 @@ viewHorse.referencePhotos.length > 0 ? (
     setShareHorseTarget(null);
   }}
 >
-  Text Care Instructions
+  Text Horse Card
 </button>
               <button
   className="secondary-button"
@@ -4673,7 +4846,7 @@ viewHorse.referencePhotos.length > 0 ? (
     setShareHorseTarget(null);
   }}
 >
-  Email Care Instructions
+  Email Horse Card
 </button>
 
               <button
@@ -5229,11 +5402,11 @@ viewHorse.referencePhotos.length > 0 ? (
   await updateDoc(
     doc(db, "feed_inventory", refillFeedItem.id),
     {
-      currentQuantity: (refillFeedItem.currentQuantity ?? 0) + addedHay,
-      quantityUpdatedAt: Date.now(),
-      updatedAt: Date.now(),
-      lowFeedPushSent: false,
-    }
+  currentQuantity: (refillFeedItem.currentQuantity ?? 0) + addedHay,
+  quantityUpdatedAt: Date.now(),
+  lowFeedPushSent: false,
+  updatedAt: Date.now(),
+}
   );
 
   await loadFeedInventory(feedInventoryHorse.id);

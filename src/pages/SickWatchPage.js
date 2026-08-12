@@ -14,7 +14,6 @@ import {
   orderBy,
   query,
   updateDoc,
-  deleteDoc,
   where,
 } from "firebase/firestore";
 
@@ -66,7 +65,6 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   const [searchParams] = useSearchParams();
   const horseIdFromURL = searchParams.get("horseId");
   const justStartedSickWatch = location.state?.justStartedSickWatch;
-  const startedAtFromState = location.state?.startedAt;
 
   const [freshStartedHorse, setFreshStartedHorse] = useState(null);
 

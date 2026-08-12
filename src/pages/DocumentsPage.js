@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { db, storage } from "../firebase";
 import {
@@ -124,7 +124,7 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
     };
   }, [documents]);
 
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     if (!user?.uid) {
       setDocuments([]);
       setDocumentsStatus("");
@@ -148,11 +148,11 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
       setDocuments([]);
       setDocumentsStatus("Could not load documents.");
     }
-  };
+  }, [user?.uid]);
 
   useEffect(() => {
-    loadDocuments();
-  }, [user?.uid]);
+  loadDocuments();
+}, [loadDocuments]);
 
   const filteredDocuments = useMemo(() => {
     if (filterValue === "all") return documents;

@@ -814,6 +814,7 @@ const [annualPrice, setAnnualPrice] = useState("");
   const [showCaretakerEntry, setShowCaretakerEntry] = useState(false);
   const [caretakerInviteCode, setCaretakerInviteCode] = useState("");
 const [joiningCaretakerInvite, setJoiningCaretakerInvite] = useState(false);
+const [savingUserType, setSavingUserType] = useState(false);
 
   const { isActive: hasPaidSubscription, loading: subLoading } = useSubscription(userAccess);
   const isOnline = useOnlineStatus();
@@ -1034,15 +1035,13 @@ const accessData = await ensureUserAccessDoc(authUser);
         : null
     );
 
-    const horseAccessState = await refreshHorseAccessState(uid);
+    refreshHorseAccessState(uid).catch((error) => {
+  console.log("BACKGROUND HORSE ACCESS REFRESH ERROR:", error);
+});
 
 return {
   accessData,
   userType: currentUserType,
-  ownerHorses: horseAccessState.ownerHorses,
-  careHorses: horseAccessState.careHorses,
-  hasActiveCaretakerAccess:
-    horseAccessState.hasActiveCaretakerAccess,
 };
   } catch (error) {
     console.log("REFRESH USER STATE ERROR:", error);
@@ -1165,6 +1164,15 @@ return {
 const handleUserTypeSelection = async (selectedUserType) => {
   if (!user?.uid) return;
 
+    if (savingUserType) return;
+
+    if (selectedUserType === "caretaker") {
+  setShowCaretakerEntry(true);
+  return;
+}
+
+  setSavingUserType(true);
+
   try {
     const userRef = doc(db, "users", user.uid);
     const userSnap = await getDoc(userRef);
@@ -1206,16 +1214,23 @@ const handleUserTypeSelection = async (selectedUserType) => {
       { merge: true }
     );
 
-    await refreshUserState(user);
+    setUserAccess((current) => ({
+  ...(current || existingData),
+  ...updates,
+}));
 
-    if (finalUserType === "caretaker") {
-      setShowCaretakerEntry(true);
-    } else {
-      setShowCaretakerEntry(false);
-    }
-  } catch (error) {
+setUserType("owner");
+setRole("owner");
+setShowCaretakerEntry(false);
+
+refreshHorseAccessState(user.uid).catch((error) => {
+  console.log("BACKGROUND HORSE ACCESS REFRESH ERROR:", error);
+});
+    } catch (error) {
     console.log("SAVE USER TYPE ERROR:", error);
     alert("Could not save your selection. Please try again.");
+  } finally {
+    setSavingUserType(false);
   }
 };
 
@@ -1264,6 +1279,11 @@ await setDoc(doc(db, "caretakerAccess", activeAccessId), {
 });
 
 await deleteDoc(doc(db, "caretakerAccess", inviteDoc.id));
+
+await updateDoc(doc(db, "users", user.uid), {
+  userType: "caretaker",
+  updatedAt: Date.now(),
+});
 
 await refreshHorseAccessState(user.uid);
 
@@ -1390,48 +1410,45 @@ const addResource = async () => {
       setUser(u);
 
       if (u) {
-  try {
-    await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
+  (async () => {
+    try {
+      await Purchases.setLogLevel({ level: LOG_LEVEL.DEBUG });
 
-    if (Capacitor.getPlatform() === "ios") {
-      await Purchases.configure({
-        apiKey: REVENUECAT_APPLE_API_KEY,
-        appUserID: u.uid,
-      });
+      if (Capacitor.getPlatform() === "ios") {
+        await Purchases.configure({
+          apiKey: REVENUECAT_APPLE_API_KEY,
+          appUserID: u.uid,
+        });
 
-      const offerings = await Purchases.getOfferings();
-const current = offerings.current;
+        const offerings = await Purchases.getOfferings();
+        const current = offerings.current;
 
-if (current) {
-  const monthlyPackage = current.availablePackages.find(
-    (item) => item.identifier === "$rc_monthly"
-  );
+        if (current) {
+          const monthlyPackage = current.availablePackages.find(
+            (item) => item.identifier === "$rc_monthly"
+          );
 
-  const annualPackage = current.availablePackages.find(
-    (item) => item.identifier === "$rc_annual"
-  );
+          const annualPackage = current.availablePackages.find(
+            (item) => item.identifier === "$rc_annual"
+          );
 
-  setMonthlyPrice(
-    monthlyPackage?.product?.priceString ||
-      monthlyPackage?.storeProduct?.priceString ||
-      ""
-  );
+          setMonthlyPrice(
+            monthlyPackage?.product?.priceString ||
+              monthlyPackage?.storeProduct?.priceString ||
+              ""
+          );
 
-  setAnnualPrice(
-    annualPackage?.product?.priceString ||
-      annualPackage?.storeProduct?.priceString ||
-      ""
-  );
-
-  console.log(
-    "APP PAYWALL SUBSCRIPTION PACKAGES:",
-    current.availablePackages
-  );
-}
+          setAnnualPrice(
+            annualPackage?.product?.priceString ||
+              annualPackage?.storeProduct?.priceString ||
+              ""
+          );
+        }
+      }
+    } catch (e) {
+      console.log("REVENUECAT INIT ERROR:", e);
     }
-  } catch (e) {
-    console.log("REVENUECAT INIT ERROR:", e);
-  }
+  })();
 }
       setActiveHorseId("");
 
@@ -1446,7 +1463,9 @@ if (current) {
 try {
   const refreshedState = await refreshUserState(u);
 
-  await registerForPushNotifications(u);
+  registerForPushNotifications(u).catch((error) => {
+  console.log("BACKGROUND PUSH REGISTRATION ERROR:", error);
+});
 
   if (!refreshedState?.accessData?.hasSeenIntro) {
     setShowIntro(true);
@@ -1523,7 +1542,7 @@ console.log("USER ACCESS DEBUG", {
   accessState,
 });
 
-if (user && !userType) {
+if (user && !userType && !showCaretakerEntry) {
   return (
     <div
       style={{
@@ -1571,9 +1590,10 @@ if (user && !userType) {
         </div>
 
         <button
-          type="button"
-          onClick={() => handleUserTypeSelection("owner")}
-          style={{
+  type="button"
+  onClick={() => handleUserTypeSelection("owner")}
+  disabled={savingUserType}
+  style={{
             width: "100%",
             border: "none",
             borderRadius: 14,
@@ -1582,16 +1602,18 @@ if (user && !userType) {
             color: "#FFFFFF",
             fontSize: 16,
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: savingUserType ? "not-allowed" : "pointer",
+opacity: savingUserType ? 0.7 : 1,
           }}
         >
-          I own horses
+          {savingUserType ? "Setting up your account..." : "I own horses"}
         </button>
 
         <button
-          type="button"
-          onClick={() => handleUserTypeSelection("caretaker")}
-          style={{
+  type="button"
+  onClick={() => handleUserTypeSelection("caretaker")}
+  disabled={savingUserType}
+  style={{
             width: "100%",
             marginTop: 12,
             border: "1px solid #24324A",
@@ -1601,10 +1623,13 @@ if (user && !userType) {
             color: "#24324A",
             fontSize: 16,
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: savingUserType ? "not-allowed" : "pointer",
+opacity: savingUserType ? 0.7 : 1,
           }}
         >
-          I'm caring for someone else's horses
+          {savingUserType
+  ? "Setting up your account..."
+  : "I'm caring for someone else's horses"}
         </button>
       </div>
     </div>
@@ -1702,14 +1727,8 @@ if (
         <button
   type="button"
   onClick={async () => {
-    setCaretakerInviteCode("");
-
-    if (accessState === "CARETAKER_NEEDS_INVITE") {
-      await signOut(auth);
-      return;
-    }
-
-    setShowCaretakerEntry(false);
+  setCaretakerInviteCode("");
+  setShowCaretakerEntry(false);
   }}
   style={{
     width: "100%",

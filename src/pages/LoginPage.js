@@ -86,12 +86,14 @@ if (password.length < 6) {
       alert("Password must be at least 6 characters.");
       break;
 
-    default:
+        default:
       alert("Could not create account. Please try again.");
       break;
   }
+} finally {
+  setLoading(false);
 }
-  };
+};
 
   const handlePasswordReset = async () => {
     if (!email.trim()) {

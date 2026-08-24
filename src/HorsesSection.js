@@ -221,8 +221,10 @@ const getFeedInventoryStatus = (item) => {
 export default function HorsesSection(props) {
 
   const {
-    user,
-    horses,
+  user,
+  accessState,
+  onStartTrial,
+  horses,
     setHorses,
     horsesStatus,
     setHorsesStatus,
@@ -483,6 +485,18 @@ setReferencePhotos([]);
   };
 
   const openFeedInventory = async (horse) => {
+  if (accessState === "PREVIEW") {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to manage feed inventory and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      onStartTrial?.();
+    }
+
+    return;
+  }
+
   setFeedInventoryHorse(horse);
   setIsFeedInventoryOpen(true);
   setIsFeedFormOpen(false);
@@ -872,10 +886,27 @@ useEffect(() => {
 }, [location.state, horses]);
 
   const openAdd = () => {
-    setMode("add");
-    clearForm();
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW" && horses.length >= 1) {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to add another horse and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      setIsOpen(false);
+      clearForm();
+
+      setTimeout(() => {
+        onStartTrial?.();
+      }, 50);
+    }
+
+    return;
+  }
+
+  setMode("add");
+  clearForm();
+  setIsOpen(true);
+};
 
   const openEdit = (horse) => {
     if (horsePhotoUrl && horsePhotoUrl.startsWith("blob:")) {
@@ -913,11 +944,23 @@ setHorseVet({
   };
 
   const openCareModal = (horse) => {
-    setCareHorse(horse);
-    clearCareForm();
-    setIsAddCareOpen(false);
-    setIsCareOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to add care appointments and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      onStartTrial?.();
+    }
+
+    return;
+  }
+
+  setCareHorse(horse);
+  clearCareForm();
+  setIsAddCareOpen(false);
+  setIsCareOpen(true);
+};
 
   const loadLogsForHorse = async (horseId, itemLimit = 10) => {
     if (!user?.uid || !horseId) return [];
@@ -1227,10 +1270,22 @@ setHorseVet({
   };
 
   const openLog = (horse) => {
-    setLogHorse(horse);
-    setLogText("");
-    setIsLogOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to add logs and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      onStartTrial?.();
+    }
+
+    return;
+  }
+
+  setLogHorse(horse);
+  setLogText("");
+  setIsLogOpen(true);
+};
 
   const closeLog = () => {
     setIsLogOpen(false);
@@ -1596,7 +1651,19 @@ try {
   };
 
   const startSickWatch = async (horseId) => {
-    if (!user?.uid || !horseId) return;
+  if (!user?.uid || !horseId) return;
+
+  if (accessState === "PREVIEW") {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to use Sick Watch and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      onStartTrial?.();
+    }
+
+    return;
+  }
 
     try {
       await updateDoc(doc(db, "horses", horseId), {
@@ -1654,6 +1721,22 @@ try {
     alert("Please log in first.");
     return;
   }
+
+  if (
+  mode === "add" &&
+  accessState === "PREVIEW" &&
+  horses.length >= 1
+) {
+  const shouldStartTrial = window.confirm(
+    "Start your 14-day free trial to add another horse and unlock the rest of Lex."
+  );
+
+  if (shouldStartTrial) {
+    onStartTrial?.();
+  }
+
+  return;
+}
 
   if (isOffline()) {
   alert("You're offline. New horse changes can't be saved right now.");
@@ -1776,8 +1859,11 @@ blanketNotes: cleanText(blanketNotes),
       }
     }
 
-    await reloadHorses();
     closeModal();
+
+reloadHorses().catch((error) => {
+  console.log("BACKGROUND HORSE RELOAD ERROR:", error);
+});
   } catch (e) {
     console.log("SAVE HORSE ERROR:", e);
     alert(mode === "add" ? "Failed to add horse." : "Failed to update horse.");
@@ -1787,7 +1873,19 @@ blanketNotes: cleanText(blanketNotes),
 };
 
   const openHorseLex = async (horse) => {
-    setHorseLexHorse(horse);
+  if (accessState === "PREVIEW") {
+    const shouldStartTrial = window.confirm(
+      "Start your 14-day free trial to use Ask Lex and unlock the rest of Lex."
+    );
+
+    if (shouldStartTrial) {
+      onStartTrial?.();
+    }
+
+    return;
+  }
+
+  setHorseLexHorse(horse);
     setHorseLexQuestion("");
     setHorseLexAnswer("");
     setHorseLexLoading(false);
@@ -5441,7 +5539,21 @@ await loadFeedInventory(feedInventoryHorse.id);
   </div>
 ) : null}
 
-      <FloatingAskLex onAsk={onAsk} />
+      <FloatingAskLex
+  onAsk={
+    accessState === "PREVIEW"
+      ? () => {
+          const shouldStartTrial = window.confirm(
+            "Start your 14-day free trial to use Ask Lex and unlock the rest of Lex."
+          );
+
+          if (shouldStartTrial) {
+            onStartTrial?.();
+          }
+        }
+      : onAsk
+  }
+/>
       <BottomNav />
     </div>
   );

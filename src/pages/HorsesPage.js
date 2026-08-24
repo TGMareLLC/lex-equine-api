@@ -4,6 +4,8 @@ import FloatingAskLex from "../components/FloatingAskLex";
 export default function HorsesPage({
   user,
   role,
+  accessState,
+    onStartTrial,
   horses,
   setHorses,
   horsesStatus,
@@ -17,6 +19,8 @@ export default function HorsesPage({
       <HorsesSection
         user={user}
         role={role}
+        accessState={accessState}
+        onStartTrial={onStartTrial}
         horses={horses}
         setHorses={setHorses}
         horsesStatus={horsesStatus}

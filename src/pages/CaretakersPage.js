@@ -22,6 +22,8 @@ export default function CaretakersPage({
   horses = [],
   careHorses = [],
   isCaretakerOnly = false,
+  accessState,
+  onStartTrial,
   onCaretakerAccessChanged,
 }) {
   const navigate = useNavigate();
@@ -58,6 +60,11 @@ export default function CaretakersPage({
 };
 
   const handleCreateCaretakerInvite = async () => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   if (!user?.uid) {
     alert("You must be logged in to invite a caretaker.");
     return;
@@ -263,7 +270,14 @@ setLoading(false);
           </div>
 
           <button
-            onClick={() => setShowInviteModal(true)}
+            onClick={() => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setShowInviteModal(true);
+}}
             style={{
               width: "100%",
               border: "none",
@@ -343,7 +357,14 @@ setLoading(false);
 </div>
 
 <button
-  onClick={() => navigate(`/caretakers/${caretaker.id}`)}
+  onClick={() => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  navigate(`/caretakers/${caretaker.id}`);
+}}
   style={{
     width: "100%",
     border: "1px solid #E5E2DA",

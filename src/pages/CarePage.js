@@ -144,7 +144,13 @@ costAmount: item.costAmount || null,
 createdAt: item.createdAt || Date.now(),
 });
 
-export default function CarePage({ user, horses = [], onAsk }) {
+export default function CarePage({
+  user,
+  horses = [],
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const location = useLocation();
 const navigate = useNavigate();
   const [careItems, setCareItems] = useState([]);
@@ -289,30 +295,40 @@ setCareStatus(items.length ? "" : "No care items yet.");
   );
 
   const openAddCare = () => {
-    clearForm();
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  clearForm();
+  setIsOpen(true);
+};
 
   const openEditCare = (item) => {
-    setIsEditingCare(true);
-    setEditingCareId(item.id || "");
-    setCareType(item.type || "Farrier");
-    setCareTitle(
-      item.type === "Custom" ? item.title || "" : ""
-    );
-    setCareHorseId(item.horseId || "shared");
-    setCareDate(
-      item.dueDate
-        ? new Date(item.dueDate).toISOString().slice(0, 10)
-        : getTodayInputValue()
-    );
-    setCareTime(item.time || "");
-    setRepeatInterval(item.repeatInterval || "One Time");
-    setAlertTiming(item.alertTiming || "1 Day Before");
-    setCareNotes(item.notes || "");
-    setCareCost(item.costAmount ? String(item.costAmount) : "");
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setIsEditingCare(true);
+  setEditingCareId(item.id || "");
+  setCareType(item.type || "Farrier");
+  setCareTitle(
+    item.type === "Custom" ? item.title || "" : ""
+  );
+  setCareHorseId(item.horseId || "shared");
+  setCareDate(
+    item.dueDate
+      ? new Date(item.dueDate).toISOString().slice(0, 10)
+      : getTodayInputValue()
+  );
+  setCareTime(item.time || "");
+  setRepeatInterval(item.repeatInterval || "One Time");
+  setAlertTiming(item.alertTiming || "1 Day Before");
+  setCareNotes(item.notes || "");
+  setCareCost(item.costAmount ? String(item.costAmount) : "");
+  setIsOpen(true);
+};
 
   const saveCare = async () => {
     if (!user?.uid) {
@@ -400,6 +416,11 @@ completed: false,
   const markDone = async (item) => {
   if (!item?.id) return;
 
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   try {
     await addDoc(collection(db, "care_history"), buildCareHistoryPayload(item));
 
@@ -454,9 +475,14 @@ completed: false,
   }
 };
   const deleteItem = async (id) => {
-    if (!id) return;
+  if (!id) return;
 
-    const confirmed = window.confirm("Delete this care item?");
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this care item?");
     if (!confirmed) return;
 
     try {

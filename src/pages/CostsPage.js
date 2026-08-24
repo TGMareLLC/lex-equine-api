@@ -65,7 +65,13 @@ const csvEscape = (value) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export default function CostsPage({ user, horses = [], onAsk }) {
+export default function CostsPage({
+  user,
+  horses = [],
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const location = useLocation();
 const navigate = useNavigate();
   const [costs, setCosts] = useState([]);
@@ -170,30 +176,45 @@ const borderColor = "#E5E2DA";
   };
 
   const openAdd = () => {
-    clearCostForm();
-    setMode("add");
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  clearCostForm();
+  setMode("add");
+  setIsOpen(true);
+};
 
   const openExportModal = () => {
-    clearExportForm();
-    setIsExportOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  clearExportForm();
+  setIsExportOpen(true);
+};
 
   const openEdit = (cost) => {
-    setMode("edit");
-    setEditingCostId(cost.id || "");
-    setCostAmount(String(cost.amount ?? ""));
-    setCostCategory(cost.category || "hay");
-    setCostItem(cost.item || "");
-    setCostHorseId(cost.horseId || "shared");
-    setCostVendor(cost.vendor || "");
-    setCostDate(
-      cost.createdAt ? new Date(cost.createdAt).toISOString().slice(0, 10) : getTodayInputValue()
-    );
-    setCostNotes(cost.notes || "");
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setMode("edit");
+  setEditingCostId(cost.id || "");
+  setCostAmount(String(cost.amount ?? ""));
+  setCostCategory(cost.category || "hay");
+  setCostItem(cost.item || "");
+  setCostHorseId(cost.horseId || "shared");
+  setCostVendor(cost.vendor || "");
+  setCostDate(
+    cost.createdAt ? new Date(cost.createdAt).toISOString().slice(0, 10) : getTodayInputValue()
+  );
+  setCostNotes(cost.notes || "");
+  setIsOpen(true);
+};
 
   const loadCosts = async () => {
     if (!user?.uid) {
@@ -242,10 +263,15 @@ const borderColor = "#E5E2DA";
   };
 
     const scanReceipt = async () => {
-    if (!receiptPhoto) {
-      alert("Choose a receipt photo first.");
-      return;
-    }
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!receiptPhoto) {
+    alert("Choose a receipt photo first.");
+    return;
+  }
 
     if (typeof onAsk !== "function") {
       alert("Lex scanner is not connected.");
@@ -329,10 +355,15 @@ Rules:
   };
 
   const saveCost = async () => {
-    if (!user?.uid) {
-      alert("Please log in first.");
-      return;
-    }
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!user?.uid) {
+    alert("Please log in first.");
+    return;
+  }
 
     if (isOffline()) {
   alert("You're offline. New cost changes can't be saved right now.");
@@ -394,9 +425,14 @@ Rules:
   };
 
   const deleteCost = async (costId) => {
-    if (!costId) return;
+  if (!costId) return;
 
-    const confirmed = window.confirm("Delete this cost entry?");
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this cost entry?");
     if (!confirmed) return;
 
     try {

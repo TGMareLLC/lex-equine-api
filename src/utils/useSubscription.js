@@ -19,10 +19,7 @@ export default function useSubscription(userAccess) {
           return;
         }
 
-        const now = Date.now();
         const override = !!userAccess.subscriptionOverride;
-        const trialEndsAt = Number(userAccess.trialEndsAt || 0);
-        const inTrial = trialEndsAt > now;
 
         let hasRevenueCatAccess = false;
 
@@ -37,21 +34,18 @@ export default function useSubscription(userAccess) {
         }
 
         if (!cancelled) {
-          setIsActive(override || inTrial || hasRevenueCatAccess);
+          setIsActive(override || hasRevenueCatAccess);
           setLoading(false);
         }
       } catch (e) {
         console.log("SUBSCRIPTION CHECK ERROR:", e);
 
-        const now = Date.now();
         const override = !!userAccess?.subscriptionOverride;
-        const trialEndsAt = Number(userAccess?.trialEndsAt || 0);
-        const inTrial = trialEndsAt > now;
 
-        if (!cancelled) {
-          setIsActive(override || inTrial);
-          setLoading(false);
-        }
+if (!cancelled) {
+  setIsActive(override);
+  setLoading(false);
+}
       }
     };
 

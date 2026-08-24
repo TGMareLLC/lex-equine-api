@@ -35,11 +35,9 @@ export default function AccountPage({
   const [userType, setUserType] = useState("");
 
   const [subscriptionStatus, setSubscriptionStatus] = useState("Loading...");
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [selectedPlanId, setSelectedPlanId] = useState("$rc_annual");
+const [isSubscribed, setIsSubscribed] = useState(false);
+const [selectedPlanId, setSelectedPlanId] = useState("$rc_monthly");
 const [purchasing, setPurchasing] = useState(false);
-const [trialEndsAt, setTrialEndsAt] = useState(null);
-const [trialStartedAt, setTrialStartedAt] = useState(null);
 const [monthlyPrice, setMonthlyPrice] = useState("");
 const [annualPrice, setAnnualPrice] = useState("");
 
@@ -50,10 +48,7 @@ const [annualPrice, setAnnualPrice] = useState("");
   const homeBg = "#F6F4EE";
 
   const user = auth.currentUser;
-  const trialDaysLeft =
-  trialEndsAt && trialEndsAt > Date.now()
-    ? Math.ceil((trialEndsAt - Date.now()) / (24 * 60 * 60 * 1000))
-    : 0;
+  
 
   useEffect(() => {
   const loadAccountData = async () => {
@@ -66,8 +61,7 @@ const [annualPrice, setAnnualPrice] = useState("");
       
 
       setUserType(userData?.userType || "");
-      setTrialEndsAt(userData?.trialEndsAt || null);
-      setTrialStartedAt(userData?.trialStartedAt || null);
+      
     } catch (e) {
       console.log("LOAD ACCOUNT DATA ERROR:", e);
       
@@ -218,7 +212,7 @@ const handleBecomeOwner = async () => {
   if (!user?.uid) return;
 
   const confirmed = window.confirm(
-    "Become a horse owner?\n\nThis will unlock the owner setup so you can add your own horses and begin the subscription flow."
+    "Become a horse owner? You can add one horse and explore Lex before starting your 14-day free trial."
   );
 
   if (!confirmed) return;
@@ -226,32 +220,23 @@ const handleBecomeOwner = async () => {
   try {
     setLoading(true);
 
-    const ownerTrialStartedAt = trialStartedAt || Date.now();
-const ownerTrialEndsAt = trialStartedAt
-  ? trialEndsAt
-  : ownerTrialStartedAt + 14 * 24 * 60 * 60 * 1000;
-
     await setDoc(
       doc(db, "users", user.uid),
       {
-  userType: "owner",
-  trialStartedAt: ownerTrialStartedAt,
-  trialEndsAt: ownerTrialEndsAt,
-  subscriptionOverride: false,
-  updatedAt: Date.now(),
-},
-  { merge: true }
-);
+        userType: "owner",
+        subscriptionOverride: false,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
 
     if (typeof refreshUserState === "function") {
-  await refreshUserState(user);
-}
+      await refreshUserState(user);
+    }
 
-alert(
-  "Owner access enabled. Your 14-day free trial has started."
-);
+    setUserType("owner");
 
-navigate("/");
+    navigate("/");
   } catch (e) {
     console.log("BECOME OWNER ERROR:", e);
     alert("Could not enable owner access.");
@@ -376,7 +361,7 @@ navigate("/");
         <div style={{ marginTop: 6 }}>{user?.email}</div>
       </div>
 
-      {/* 🔥 SUBSCRIPTION SECTION */}
+      {/* SUBSCRIPTION SECTION */}
 {userType === "owner" && (
   <div className="card" style={{ marginTop: 18, padding: 18 }}>
     <div style={{ fontWeight: 600 }}>
@@ -387,25 +372,7 @@ navigate("/");
       {subscriptionStatus}
     </div>
 
-    {!isSubscribed && trialDaysLeft > 0 && (
-      <div
-        style={{
-          marginTop: 10,
-          padding: "10px 12px",
-          borderRadius: 12,
-          background: "#F5EEDB",
-          color: "#24324A",
-          fontSize: 14,
-          fontWeight: 600,
-        }}
-      >
-        {trialDaysLeft === 1
-          ? "1 day left in your free trial"
-          : `${trialDaysLeft} days left in your free trial`}
-      </div>
-    )}
-
-    {!isSubscribed && trialDaysLeft === 0 && (
+    {!isSubscribed && (
       <>
         <div
           style={{
@@ -414,7 +381,8 @@ navigate("/");
             lineHeight: 1.5,
           }}
         >
-          Your 14-day free trial has ended. Choose a subscription plan to continue owner access.
+          Choose a plan to start your 14-day free trial. You will not be
+          charged until the trial ends.
         </div>
 
         <div
@@ -455,7 +423,9 @@ navigate("/");
                 color: secondaryText,
               }}
             >
-              {monthlyPrice ? `${monthlyPrice} per month` : "Monthly subscription"}
+              {monthlyPrice
+                ? `14 days free, then ${monthlyPrice} per month`
+                : "Monthly subscription"}
             </div>
           </button>
 
@@ -490,7 +460,9 @@ navigate("/");
                 color: secondaryText,
               }}
             >
-              {annualPrice ? `${annualPrice} per year` : "Annual subscription"}
+              {annualPrice
+                ? `14 days free, then ${annualPrice} per year`
+                : "Annual subscription"}
             </div>
           </button>
 
@@ -506,9 +478,7 @@ navigate("/");
           >
             {purchasing
               ? "Processing..."
-              : selectedPlanId === "$rc_monthly"
-              ? "Start Monthly Subscription"
-              : "Start Annual Subscription"}
+              : "Start 14-Day Free Trial"}
           </button>
         </div>
       </>
@@ -551,111 +521,18 @@ navigate("/");
         lineHeight: 1.5,
       }}
     >
-      {trialStartedAt
-  ? "Become a Horse Owner by choosing a subscription plan."
-  : "Become a Horse Owner and start your 14-day free trial."}
+      Create your horse profile and explore Lex before deciding whether to
+      start your 14-day free trial.
     </div>
 
-    {trialStartedAt ? (
-  <div
-    style={{
-      marginTop: 14,
-      display: "grid",
-      gap: 10,
-    }}
-  >
     <button
-      type="button"
-      onClick={() => setSelectedPlanId("$rc_monthly")}
-      style={{
-        width: "100%",
-        padding: "14px 16px",
-        borderRadius: 14,
-        border:
-          selectedPlanId === "$rc_monthly"
-            ? "2px solid #24324A"
-            : "1px solid #E5E2DA",
-        background:
-          selectedPlanId === "$rc_monthly"
-            ? "#F5EEDB"
-            : "#FFFFFF",
-        color: "#24324A",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div style={{ fontWeight: 700 }}>Monthly</div>
-      <div
-        style={{
-          marginTop: 4,
-          fontSize: 14,
-          color: secondaryText,
-        }}
-      >
-        {monthlyPrice
-          ? `${monthlyPrice} per month`
-          : "Monthly subscription"}
-      </div>
-    </button>
-
-    <button
-      type="button"
-      onClick={() => setSelectedPlanId("$rc_annual")}
-      style={{
-        width: "100%",
-        padding: "14px 16px",
-        borderRadius: 14,
-        border:
-          selectedPlanId === "$rc_annual"
-            ? "2px solid #24324A"
-            : "1px solid #E5E2DA",
-        background:
-          selectedPlanId === "$rc_annual"
-            ? "#F5EEDB"
-            : "#FFFFFF",
-        color: "#24324A",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div style={{ fontWeight: 700 }}>Annual</div>
-      <div
-        style={{
-          marginTop: 4,
-          fontSize: 14,
-          color: secondaryText,
-        }}
-      >
-        {annualPrice
-          ? `${annualPrice} per year`
-          : "Annual subscription"}
-      </div>
-    </button>
-
-    <button
-      type="button"
       className="primary-button"
-      onClick={handleStartSubscription}
-      disabled={purchasing}
-      style={{ width: "100%" }}
+      onClick={handleBecomeOwner}
+      disabled={loading}
+      style={{ marginTop: 12 }}
     >
-      {purchasing
-        ? "Processing..."
-        : selectedPlanId === "$rc_monthly"
-        ? "Start Monthly Subscription"
-        : "Start Annual Subscription"}
+      Become a Horse Owner
     </button>
-  </div>
-) : (
-  <button
-    className="primary-button"
-    onClick={handleBecomeOwner}
-    disabled={loading}
-    style={{ marginTop: 12 }}
-  >
-    Become a Horse Owner
-  </button>
-)}
   </div>
 )}
 

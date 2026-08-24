@@ -42,7 +42,12 @@ const CARE_ITEM_PRESETS = [
   "Custom",
 ];
 
-export default function DailyCarePlanPage({ user, horses = [] }) {
+export default function DailyCarePlanPage({
+  user,
+  horses = [],
+  accessState,
+  onStartTrial,
+}) {
   const navigate = useNavigate();
   const { horseId } = useParams();
 
@@ -92,6 +97,11 @@ React.useEffect(() => {
 
 
 const saveDailyCarePlan = async () => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   if (!horseId) return;
 
   try {
@@ -608,7 +618,14 @@ addDoc(collection(db, "care_history"), {
 
 {!isCaretaker ? (
   <button
-    onClick={() => setShowPresetPicker(true)}
+    onClick={() => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setShowPresetPicker(true);
+}}
     style={{
       width: "100%",
       marginTop: 18,

@@ -88,15 +88,13 @@ try {
 
   const now = Date.now();
 
-  const newUserAccess = {
-    email: user.email || "",
-    trialStartedAt: now,
-    trialEndsAt: now + TRIAL_LENGTH_MS,
-    subscriptionOverride: false,
-    overrideReason: "",
-    createdAt: now,
-    updatedAt: now,
-  };
+const newUserAccess = {
+  email: user.email || "",
+  subscriptionOverride: false,
+  overrideReason: "",
+  createdAt: now,
+  updatedAt: now,
+};
 
   await setDoc(userRef, newUserAccess);
 
@@ -384,11 +382,43 @@ function IntroModal({ open, onFinish }) {
   );
 }
 
+function PreviewInteractionGate({
+  accessState,
+  onStartTrial,
+  children,
+}) {
+  const blockPreviewAction = (event) => {
+    if (accessState !== "PREVIEW") return;
+
+    const interactiveElement = event.target.closest?.(
+      "button, a, input, textarea, select, [role='button']"
+    );
+
+    if (!interactiveElement) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    onStartTrial?.();
+  };
+
+  return (
+    <div
+      onPointerDownCapture={blockPreviewAction}
+      onClickCapture={blockPreviewAction}
+    >
+      {children}
+    </div>
+  );
+}
+
 function AppRoutes(props) {
   const {
     user,
     role,
     isCaretakerOnly,
+    accessState,
+    startSubscription,
     horses,
 setHorses,
 horsesStatus,
@@ -585,6 +615,8 @@ careHorsesStatus={careHorsesStatus}
       <HorsesPage
         user={user}
         role={role}
+        accessState={accessState}
+        onStartTrial={startSubscription}
         horses={isCaretakerOnly ? careHorses : horses}
         setHorses={isCaretakerOnly ? () => {} : setHorses}
         horsesStatus={
@@ -611,10 +643,12 @@ careHorsesStatus={careHorsesStatus}
         <Navigate to="/" replace />
       ) : (
         <CostsPage
-          user={user}
-          horses={horses}
-          onAsk={onAsk}
-        />
+  user={user}
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       )}
     </ProtectedRoute>
   }
@@ -628,10 +662,12 @@ careHorsesStatus={careHorsesStatus}
         <Navigate to="/" replace />
       ) : (
         <EventsPage
-          user={user}
-          horses={horses}
-          onAsk={onAsk}
-        />
+  user={user}
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       )}
     </ProtectedRoute>
   }
@@ -645,10 +681,12 @@ careHorsesStatus={careHorsesStatus}
         <Navigate to="/" replace />
       ) : (
         <CarePage
-          user={user}
-          horses={horses}
-          onAsk={onAsk}
-        />
+  user={user}
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       )}
     </ProtectedRoute>
   }
@@ -661,7 +699,12 @@ careHorsesStatus={careHorsesStatus}
       <Navigate to="/" replace />
     ) : (
       <ProtectedRoute user={user}>
-        <SickWatchPage horses={horses} onAsk={onAsk} />
+        <SickWatchPage
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       </ProtectedRoute>
     )
   }
@@ -675,9 +718,11 @@ careHorsesStatus={careHorsesStatus}
         <Navigate to="/" replace />
       ) : (
         <ResourcesPage
-          horses={horses}
-          onAsk={onAsk}
-        />
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       )}
     </ProtectedRoute>
   }
@@ -688,14 +733,16 @@ careHorsesStatus={careHorsesStatus}
   element={
     <ProtectedRoute user={user}>
       <CaretakersPage
-        user={user}
-        horses={horses}
-        careHorses={careHorses}
-        isCaretakerOnly={isCaretakerOnly}
-        onCaretakerAccessChanged={() =>
-  refreshHorseAccessState(user?.uid)
-}
-      />
+  user={user}
+  horses={horses}
+  careHorses={careHorses}
+  isCaretakerOnly={isCaretakerOnly}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+  onCaretakerAccessChanged={() =>
+    refreshHorseAccessState(user?.uid)
+  }
+/>
     </ProtectedRoute>
   }
 />
@@ -704,10 +751,19 @@ careHorsesStatus={careHorsesStatus}
   path="/caretakers/:caretakerId"
   element={
     <ProtectedRoute user={user}>
-      <CaretakerDetailPage
-        user={user}
-        horses={horses}
-      />
+      {isCaretakerOnly ? (
+        <Navigate to="/" replace />
+      ) : (
+        <CaretakerDetailPage
+          user={user}
+          horses={horses}
+          accessState={accessState}
+          onStartTrial={startSubscription}
+          onCaretakerAccessChanged={() =>
+            refreshHorseAccessState(user?.uid)
+          }
+        />
+      )}
     </ProtectedRoute>
   }
 />
@@ -716,10 +772,19 @@ careHorsesStatus={careHorsesStatus}
   path="/daily-care/:horseId"
   element={
     <ProtectedRoute user={user}>
-      <DailyCarePlanPage
-  user={user}
-  horses={[...horses, ...careHorses]}
-/>
+      {isCaretakerOnly ? (
+        <DailyCarePlanPage
+          user={user}
+          horses={[...horses, ...careHorses]}
+        />
+      ) : (
+        <DailyCarePlanPage
+          user={user}
+          horses={[...horses, ...careHorses]}
+          accessState={accessState}
+          onStartTrial={startSubscription}
+        />
+      )}
     </ProtectedRoute>
   }
 />
@@ -741,10 +806,12 @@ careHorsesStatus={careHorsesStatus}
         <Navigate to="/" replace />
       ) : (
         <DocumentsPage
-          user={user}
-          horses={horses}
-          onAsk={onAsk}
-        />
+  user={user}
+  horses={horses}
+  onAsk={onAsk}
+  accessState={accessState}
+  onStartTrial={startSubscription}
+/>
       )}
     </ProtectedRoute>
   }
@@ -757,7 +824,10 @@ careHorsesStatus={careHorsesStatus}
       {isCaretakerOnly ? (
         <Navigate to="/" replace />
       ) : (
-        <DocumentDetailPage user={user} onAsk={onAsk} />
+        <DocumentDetailPage
+          user={user}
+          onAsk={onAsk}
+        />
       )}
     </ProtectedRoute>
   }
@@ -807,9 +877,10 @@ const [hasActiveCaretakerAccess, setHasActiveCaretakerAccess] = useState(false);
   const [password, setPassword] = useState("");
   const [userAccess, setUserAccess] = useState(null);
   const [userAccessLoading, setUserAccessLoading] = useState(true);
-  const [selectedPlanId, setSelectedPlanId] = useState("$rc_annual");
-  const [monthlyPrice, setMonthlyPrice] = useState("");
+  const [selectedPlanId, setSelectedPlanId] = useState("$rc_monthly");
+const [monthlyPrice, setMonthlyPrice] = useState("");
 const [annualPrice, setAnnualPrice] = useState("");
+const [showTrialPlanPicker, setShowTrialPlanPicker] = useState(false);
   const [showIntro, setShowIntro] = useState(false);
   const [showCaretakerEntry, setShowCaretakerEntry] = useState(false);
   const [caretakerInviteCode, setCaretakerInviteCode] = useState("");
@@ -830,11 +901,6 @@ const hasAccessOverride = !!userAccess?.subscriptionOverride;
 
 const hasCaretakerAccess = hasActiveCaretakerAccess;
 
-const isTrialActive =
-  !hasPaidSubscription &&
-  !hasAccessOverride &&
-  trialEndsAt > now;
-
 const accessState =
   userType === "caretaker"
     ? hasCaretakerAccess
@@ -842,9 +908,7 @@ const accessState =
       : "CARETAKER_NEEDS_INVITE"
     : hasPaidSubscription || hasAccessOverride
     ? "ACTIVE_SUBSCRIPTION"
-    : isTrialActive
-    ? "TRIAL_ACTIVE"
-    : "NO_ACCESS";
+    : "PREVIEW";
 
 const isCaretakerOnly =
   userType === "caretaker";
@@ -1084,6 +1148,17 @@ return {
   };
 
    const onAsk = async (incomingQuestion, incomingPhoto = null) => {
+    if (accessState === "PREVIEW") {
+  const shouldStartTrial = window.confirm(
+    "Start your 14-day free trial to use Ask Lex."
+  );
+
+  if (shouldStartTrial) {
+    startSubscription();
+  }
+
+  return;
+}
   const rawQuestion =
     typeof incomingQuestion === "string"
       ? incomingQuestion.trim()
@@ -1161,79 +1236,49 @@ return {
   }
 };
 
-const handleUserTypeSelection = async (selectedUserType) => {
+const handleUserTypeSelection = (selectedUserType) => {
   if (!user?.uid) return;
 
-    if (savingUserType) return;
+  if (savingUserType) return;
 
-    if (selectedUserType === "caretaker") {
-  setShowCaretakerEntry(true);
-  return;
-}
+  if (selectedUserType === "caretaker") {
+    setShowCaretakerEntry(true);
+    return;
+  }
 
   setSavingUserType(true);
 
-  try {
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
+  const updates = {
+    userType: "owner",
+    updatedAt: Date.now(),
+  };
 
-    const existingData = userSnap.exists()
-      ? userSnap.data()
-      : {};
+  // Update the app immediately. Do not make onboarding
+  // wait for a Firestore round trip.
+  setUserAccess((current) => ({
+    ...(current || {}),
+    ...updates,
+  }));
 
-    const existingUserType = existingData?.userType || "";
+  setUserType("owner");
+  setRole("owner");
+  setShowCaretakerEntry(false);
+  setSavingUserType(false);
 
-    // Owner status is permanent. Never downgrade an owner to caretaker.
-    const finalUserType =
-      existingUserType === "owner"
-        ? "owner"
-        : selectedUserType;
+  // Persist in the background.
+  setDoc(
+    doc(db, "users", user.uid),
+    updates,
+    { merge: true }
+  ).catch((error) => {
+    console.log("BACKGROUND SAVE USER TYPE ERROR:", error);
+    alert("Lex could not finish saving your account. Please try again.");
+  });
 
-    const updates = {
-      userType: finalUserType,
-      updatedAt: Date.now(),
-    };
-
-    // Start the 14-day owner trial only when this account
-    // becomes an owner for the first time.
-    if (
-      finalUserType === "owner" &&
-      existingUserType !== "owner"
-    ) {
-      const trialStartedAt = Date.now();
-
-      updates.trialStartedAt = trialStartedAt;
-      updates.trialEndsAt =
-        trialStartedAt + 14 * 24 * 60 * 60 * 1000;
-      updates.subscriptionOverride = false;
-    }
-
-    await setDoc(
-      userRef,
-      updates,
-      { merge: true }
-    );
-
-    setUserAccess((current) => ({
-  ...(current || existingData),
-  ...updates,
-}));
-
-setUserType("owner");
-setRole("owner");
-setShowCaretakerEntry(false);
-
-refreshHorseAccessState(user.uid).catch((error) => {
-  console.log("BACKGROUND HORSE ACCESS REFRESH ERROR:", error);
-});
-    } catch (error) {
-    console.log("SAVE USER TYPE ERROR:", error);
-    alert("Could not save your selection. Please try again.");
-  } finally {
-    setSavingUserType(false);
-  }
+  refreshHorseAccessState(user.uid).catch((error) => {
+    console.log("BACKGROUND HORSE ACCESS REFRESH ERROR:", error);
+  });
 };
-
 const handleCaretakerEntryJoin = async () => {
   if (!user?.uid) {
     alert("You must be logged in to join as a caretaker.");
@@ -1316,7 +1361,11 @@ const handleRemainCaretaker = async () => {
   }
 };
 
-const startSubscription = async () => {
+const startSubscription = () => {
+  setShowTrialPlanPicker(true);
+};
+
+const purchaseSelectedSubscription = async () => {
   try {
     const offerings = await Purchases.getOfferings();
 
@@ -1328,20 +1377,24 @@ const startSubscription = async () => {
     }
 
     const pkg =
-  current.availablePackages.find((p) => p.identifier === selectedPlanId) ||
-  current.availablePackages[0];
+      current.availablePackages.find(
+        (p) => p.identifier === selectedPlanId
+      ) || current.availablePackages[0];
 
     const purchase = await Purchases.purchasePackage({
       aPackage: pkg,
     });
 
     console.log("PURCHASE SUCCESS:", purchase);
-    alert("Subscription successful! Refreshing your access...");
+
+    setShowTrialPlanPicker(false);
+
     const updatedCustomerInfo = await Purchases.getCustomerInfo();
-console.log("UPDATED CUSTOMER INFO:", updatedCustomerInfo);
-setTimeout(() => {
-  window.location.href = "/";
-}, 500);
+    console.log("UPDATED CUSTOMER INFO:", updatedCustomerInfo);
+
+    setTimeout(() => {
+      window.location.href = "/";
+    }, 500);
   } catch (e) {
     console.log("PURCHASE ERROR:", e);
 
@@ -1538,7 +1591,6 @@ console.log("USER ACCESS DEBUG", {
   now,
   trialDaysLeft,
   hasPaidSubscription,
-  isTrialActive,
   accessState,
 });
 
@@ -1976,6 +2028,155 @@ if (user && accessState === "NO_ACCESS") {
   }}
 />
 
+{showTrialPlanPicker && (
+  <div
+    className="modal-backdrop"
+    onClick={() => setShowTrialPlanPicker(false)}
+  >
+    <div
+      className="modal-sheet"
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        maxWidth: 520,
+      }}
+    >
+      <div className="modal-handle" />
+
+      <div
+        style={{
+          fontSize: 28,
+          fontWeight: 600,
+          color: "#24324A",
+          marginBottom: 8,
+        }}
+      >
+        Start Your 14-Day Free Trial
+      </div>
+
+      <div
+        style={{
+          fontSize: 15,
+          color: "#6F6A60",
+          lineHeight: 1.6,
+          marginBottom: 18,
+        }}
+      >
+        Choose the plan you want after your free trial. You will not be
+        charged until the 14-day trial ends.
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 10,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedPlanId("$rc_monthly")}
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            borderRadius: 14,
+            border:
+              selectedPlanId === "$rc_monthly"
+                ? "2px solid #24324A"
+                : "1px solid #E5E2DA",
+            background:
+              selectedPlanId === "$rc_monthly"
+                ? "#F5EEDB"
+                : "#FFFFFF",
+            color: "#24324A",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            Monthly
+          </div>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 14,
+              color: "#6F6A60",
+            }}
+          >
+            {monthlyPrice
+              ? `14 days free, then ${monthlyPrice} per month`
+              : "Monthly subscription"}
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSelectedPlanId("$rc_annual")}
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            borderRadius: 14,
+            border:
+              selectedPlanId === "$rc_annual"
+                ? "2px solid #24324A"
+                : "1px solid #E5E2DA",
+            background:
+              selectedPlanId === "$rc_annual"
+                ? "#F5EEDB"
+                : "#FFFFFF",
+            color: "#24324A",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>
+            Annual
+          </div>
+
+          <div
+            style={{
+              marginTop: 4,
+              fontSize: 14,
+              color: "#6F6A60",
+            }}
+          >
+            {annualPrice
+              ? `14 days free, then ${annualPrice} per year`
+              : "Annual subscription"}
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="primary-button"
+          onClick={purchaseSelectedSubscription}
+          style={{
+            width: "100%",
+            marginTop: 6,
+          }}
+        >
+          Start 14-Day Free Trial
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowTrialPlanPicker(false)}
+          style={{
+            width: "100%",
+            border: "none",
+            background: "transparent",
+            color: "#24324A",
+            cursor: "pointer",
+            fontSize: 14,
+            padding: 10,
+          }}
+        >
+          Not Yet
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       <div
         style={{
           maxWidth: 760,
@@ -2027,6 +2228,8 @@ if (user && accessState === "NO_ACCESS") {
   user={user}
   role={role}
   isCaretakerOnly={isCaretakerOnly}
+  accessState={accessState}
+  startSubscription={startSubscription}
   horses={horses}
   setHorses={setHorses}
   horsesStatus={horsesStatus}

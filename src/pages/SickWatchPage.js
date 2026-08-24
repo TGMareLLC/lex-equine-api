@@ -60,7 +60,12 @@ const getActiveIncidentId = (horse) => {
   return horse?.id ? `${horse.id}_legacy` : "";
 };
 
-export default function SickWatchPage({ horses = [], onAsk }) {
+export default function SickWatchPage({
+  horses = [],
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const horseIdFromURL = searchParams.get("horseId");
@@ -380,9 +385,14 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   };
 
   const openEntryModal = (horseId) => {
-    setModalHorseId(horseId);
-    resetEntryForm();
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setModalHorseId(horseId);
+  resetEntryForm();
+};
 
   const closeEntryModal = () => {
     setModalHorseId("");
@@ -437,10 +447,15 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   };
 
   const saveSickWatchEntry = async (horseId) => {
-    if (!horseId) {
-      alert("No horse selected.");
-      return;
-    }
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!horseId) {
+    alert("No horse selected.");
+    return;
+  }
 
     if (isOffline()) {
   alert("You're offline. New Sick Watch entries can't be saved right now.");
@@ -509,7 +524,12 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   };
 
   const endSickWatch = async (horseId, horseName) => {
-    if (!horseId) return;
+  if (!horseId) return;
+
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
 
     if (isOffline()) {
   alert("You're offline. Sick Watch changes can't be saved right now.");
@@ -591,14 +611,24 @@ export default function SickWatchPage({ horses = [], onAsk }) {
   };
 
   const toggleVetPanel = (horseId) => {
-    setShowVetByHorseId((prev) => ({
-      ...prev,
-      [horseId]: !prev[horseId],
-    }));
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setShowVetByHorseId((prev) => ({
+    ...prev,
+    [horseId]: !prev[horseId],
+  }));
+};
 
   const sendHorseSummary = async (horse) => {
-    const summaryText = buildHorseSummaryText(horse);
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  const summaryText = buildHorseSummaryText(horse);
 
     try {
       if (navigator.share) {

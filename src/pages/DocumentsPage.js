@@ -66,7 +66,13 @@ const getDocumentDisplayName = (item) => {
   return item.documentType || item.documentName || "Unnamed Document";
 };
 
-export default function DocumentsPage({ user, horses = [], onAsk }) {
+export default function DocumentsPage({
+  user,
+  horses = [],
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const horseIdFromURL = searchParams.get("horseId") || "";
@@ -181,9 +187,14 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
   };
 
   const openUploadModal = () => {
-    resetUploadForm();
-    setIsUploadOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  resetUploadForm();
+  setIsUploadOpen(true);
+};
 
   const closeUploadModal = () => {
     setIsUploadOpen(false);
@@ -207,10 +218,15 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
   };
 
   const handleUploadDocument = async () => {
-    if (!user?.uid) {
-      alert("Please log in first.");
-      return;
-    }
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!user?.uid) {
+    alert("Please log in first.");
+    return;
+  }
 
     if (isOffline()) {
   alert("You're offline. New documents can't be uploaded right now.");
@@ -283,7 +299,12 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
   };
 
   const handleDeleteDocument = async (item) => {
-    const confirmed = window.confirm(`Delete ${getDocumentDisplayName(item)}?`);
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete ${getDocumentDisplayName(item)}?`);
     if (!confirmed) return;
 
     try {
@@ -301,6 +322,17 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
       alert("Could not delete document.");
     }
   };
+
+  const openDocument = (item) => {
+  if (!item?.id) return;
+
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  navigate(`/documents/${item.id}`);
+};
 
   const renderStatusTag = (item) => {
     const status = getExpiryStatus(item.expiresAt);
@@ -552,7 +584,7 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
                     }}
                   >
                     <div
-                      onClick={() => navigate(`/documents/${item.id}`)}
+                      onClick={() => openDocument(item)}
                       style={{ cursor: "pointer", flex: 1 }}
                     >
                       <div
@@ -594,7 +626,7 @@ export default function DocumentsPage({ user, horses = [], onAsk }) {
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       <button
                         className="small-button"
-                        onClick={() => navigate(`/documents/${item.id}`)}
+                        onClick={() => openDocument(item)}
                       >
                         View
                       </button>

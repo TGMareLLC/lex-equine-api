@@ -30,7 +30,11 @@ const RESOURCE_TYPES = [
   { key: "trailer-repair", label: "Trailer Repair", query: "horse trailer repair" },
 ];
 
-export default function ResourcesPage({ onAsk }) {
+export default function ResourcesPage({
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const [selectedType, setSelectedType] = useState("vet");
   const [results, setResults] = useState([]);
   const [resultsStatus, setResultsStatus] = useState("");
@@ -129,7 +133,12 @@ export default function ResourcesPage({ onAsk }) {
   }, [savedResources]);
 
   const searchNearby = async () => {
-    try {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  try {
       setIsLoading(true);
       setResults([]);
       setResultsStatus("");
@@ -169,7 +178,12 @@ export default function ResourcesPage({ onAsk }) {
   };
 
   const saveResource = async (result) => {
-    if (!auth.currentUser?.uid) return;
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!auth.currentUser?.uid) return;
 
     if (isSavedResult(result.placeId)) {
       alert("Already saved.");
@@ -204,7 +218,12 @@ export default function ResourcesPage({ onAsk }) {
   };
 
   const removeSavedResource = async (savedId) => {
-    try {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  try {
       setRemovingSavedId(savedId);
       await deleteDoc(doc(db, "saved_resources", savedId));
       await loadSavedResources();
@@ -217,7 +236,12 @@ export default function ResourcesPage({ onAsk }) {
   };
 
   const setPrimaryResource = async (savedRecord) => {
-    try {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  try {
       setSettingPrimaryId(savedRecord.id);
 
       const sameType = savedResources.filter(
@@ -244,7 +268,12 @@ export default function ResourcesPage({ onAsk }) {
   };
 
   const saveHorseAssignments = async () => {
-    if (!assignResource) return;
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!assignResource) return;
 
     try {
       const field =
@@ -630,10 +659,15 @@ export default function ResourcesPage({ onAsk }) {
                   <button
                     className="small-button"
                     onClick={() => {
-                      setAssignResource(item);
-                      setSelectedHorseIds([]);
-                      setIsAssignOpen(true);
-                    }}
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setAssignResource(item);
+  setSelectedHorseIds([]);
+  setIsAssignOpen(true);
+}}
                   >
                     Assign to Horses
                   </button>

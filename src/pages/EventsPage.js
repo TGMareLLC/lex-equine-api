@@ -70,7 +70,13 @@ const formatEventDate = (value) => {
   });
 };
 
-export default function EventsPage({ user, horses = [], onAsk }) {
+export default function EventsPage({
+  user,
+  horses = [],
+  onAsk,
+  accessState,
+  onStartTrial,
+}) {
   const [events, setEvents] = useState([]);
 
   const [horseFilter, setHorseFilter] = useState("all");
@@ -141,28 +147,38 @@ export default function EventsPage({ user, horses = [], onAsk }) {
   };
 
   const openAdd = () => {
-    clearEventForm();
-    setMode("add");
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  clearEventForm();
+  setMode("add");
+  setIsOpen(true);
+};
 
   const openEdit = (event) => {
-    setMode("edit");
-    setEditingEventId(event.id || "");
-    setEventName(event.name || "");
-    setEventHorseId(event.horseId || "shared");
-    setEventLocation(event.location || "");
-    setEventCost(event.cost != null ? String(event.cost) : "");
-    setEventDate(
-      event.eventDate
-        ? new Date(event.eventDate).toISOString().slice(0, 10)
-        : getTodayInputValue()
-    );
-    setEventTime(event.time || "");
-    setEventReminder(event.reminder || "none");
-    setEventNotes(event.notes || "");
-    setIsOpen(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setMode("edit");
+  setEditingEventId(event.id || "");
+  setEventName(event.name || "");
+  setEventHorseId(event.horseId || "shared");
+  setEventLocation(event.location || "");
+  setEventCost(event.cost != null ? String(event.cost) : "");
+  setEventDate(
+    event.eventDate
+      ? new Date(event.eventDate).toISOString().slice(0, 10)
+      : getTodayInputValue()
+  );
+  setEventTime(event.time || "");
+  setEventReminder(event.reminder || "none");
+  setEventNotes(event.notes || "");
+  setIsOpen(true);
+};
 
   const loadEvents = useCallback(async () => {
     if (!user?.uid) {
@@ -194,10 +210,15 @@ export default function EventsPage({ user, horses = [], onAsk }) {
     
 
   const saveEvent = async () => {
-    if (!user?.uid) {
-      alert("Please log in first.");
-      return;
-    }
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!user?.uid) {
+    alert("Please log in first.");
+    return;
+  }
 
     if (isOffline()) {
   alert("You're offline. New events can't be saved right now.");
@@ -276,9 +297,14 @@ reminderAt,
   };
 
   const deleteEvent = async (eventId) => {
-    if (!eventId) return;
+  if (!eventId) return;
 
-    const confirmed = window.confirm("Delete this event?");
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this event?");
     if (!confirmed) return;
 
     try {
@@ -291,9 +317,14 @@ reminderAt,
   };
 
   const markDone = async (eventId) => {
-    if (!eventId) return;
+  if (!eventId) return;
 
-    try {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  try {
       await updateDoc(doc(db, "events", eventId), {
         completed: true,
         completedAt: Date.now(),

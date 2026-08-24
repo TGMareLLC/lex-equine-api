@@ -14,6 +14,8 @@ import {
 export default function CaretakerDetailPage({
   user,
   horses = [],
+  accessState,
+  onStartTrial,
   onCaretakerAccessChanged,
 }) {
   const navigate = useNavigate();
@@ -54,10 +56,14 @@ export default function CaretakerDetailPage({
   }, [caretakerId]);
 
   const startEditing = () => {
-    setEditHorseIds(caretaker.horseIds || []);
-    
-    setIsEditing(true);
-  };
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  setEditHorseIds(caretaker.horseIds || []);
+  setIsEditing(true);
+};
 
   const toggleEditHorse = (horseId) => {
     setEditHorseIds((current) =>
@@ -70,7 +76,12 @@ export default function CaretakerDetailPage({
 
 
   const handleSaveChanges = async () => {
-    if (!caretaker?.id) return;
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
+  if (!caretaker?.id) return;
 
 
     if (editHorseIds.length === 0) {
@@ -91,6 +102,11 @@ export default function CaretakerDetailPage({
   };
 
   const handleRemoveAccess = async () => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   if (!caretaker?.id) return;
 
   const confirmRemove = window.confirm(
@@ -116,6 +132,11 @@ export default function CaretakerDetailPage({
 };
 
 const handleRestoreAccess = async () => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   if (!caretaker?.id) return;
 
   try {
@@ -135,6 +156,11 @@ const handleRestoreAccess = async () => {
 };
 
 const handleDeleteCaretaker = async () => {
+  if (accessState === "PREVIEW") {
+    onStartTrial?.();
+    return;
+  }
+
   if (!caretaker?.id) return;
 
   const confirmDelete = window.confirm(

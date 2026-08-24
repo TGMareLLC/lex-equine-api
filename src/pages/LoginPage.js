@@ -99,17 +99,36 @@
 
     const handlePasswordReset = async () => {
       if (!email.trim()) {
-        alert("Enter your email to reset password.");
+        alert("Enter the email address associated with your Lex Equine account, then tap Forgot Password again.");
         return;
       }
 
       try {
         await sendPasswordResetEmail(auth, email.trim());
-        alert("Password reset email sent.");
+        alert(
+  "Password reset email sent. Check your inbox and spam folder for a message from Lex Equine."
+);
       } catch (e) {
-        console.log("RESET ERROR:", e);
-        alert("Could not send reset email.");
-      }
+  console.log("RESET ERROR:", e);
+
+  switch (e.code) {
+    case "auth/invalid-email":
+      alert("Please enter a valid email address.");
+      break;
+
+    case "auth/too-many-requests":
+      alert("Too many reset attempts. Please wait a few minutes and try again.");
+      break;
+
+    case "auth/network-request-failed":
+      alert("Unable to connect. Check your internet connection and try again.");
+      break;
+
+    default:
+      alert("We couldn't send the password reset email. Please try again.");
+      break;
+  }
+}
     };
 
     return (
